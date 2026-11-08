@@ -1,7 +1,7 @@
 /* Artha 2.0 — investments + insurance. Data lives in the "Artha – My Investments" Google Sheet via the Apps Script API. */
 (()=>{
 "use strict";
-const APP_VERSION="2.0";
+const APP_VERSION="2.1";
 const PROJECT_URL="https://claude.ai/project/01a1965d-e312-704a-8114-16f0090c8706";
 const $=id=>document.getElementById(id);
 const store={get(k,d){try{const v=localStorage.getItem("artha:"+k);return v==null?d:JSON.parse(v);}catch(e){return d;}},set(k,v){try{localStorage.setItem("artha:"+k,JSON.stringify(v));}catch(e){}}};
@@ -226,80 +226,97 @@ const first=T=>T.filter(t=>t.date).reduce((m,t)=>!m||t.date<m?t.date:m,"");
 const fyOf=s=>{ const y=+s.slice(0,4),m=+s.slice(5,7); return m>=4?y:y-1; };
 
 /* ---------- overlays + back button ---------- */
+function vanish(el){ if(el.hidden) return; el.classList.add("bye"); clearTimeout(el._vt); el._vt=setTimeout(()=>{ if(el.classList.contains("bye")){ el.hidden=true; el.classList.remove("bye"); } },200); }
 const ov={stack:[],
-  open(el,close){ el.hidden=false; this.stack.push({el,close}); history.pushState({ov:this.stack.length},""); },
+  open(el,close){ clearTimeout(el._vt); el.classList.remove("bye"); el.hidden=false; this.stack.push({el,close}); history.pushState({ov:this.stack.length},""); },
   back(){ history.back(); },
   pop(){ const o=this.stack.pop(); if(o) o.close(); }};
 addEventListener("popstate",()=>ov.pop());
-const isOpen=el=>!el.hidden;
+const isOpen=el=>!el.hidden&&!el.classList.contains("bye");
 
 /* ---------- HOME ---------- */
-let VIEW=store.get("view","chart"), OPENC=new Set(), FACE=0, RANGE=store.get("range","All"), FLOWG=store.get("flowg","FY");
+let VIEW=store.get("view","chart"), OPENC=new Set(), FACE=0, SCOPE="all", RANGE=store.get("range","All"), FLOWG=store.get("flowg","FY");
+const calm=()=>document.documentElement.classList.contains("calm");
 function homeGroups(who){ return HOME.map(h=>({h,r:agg(h,who||WHO)})).filter(x=>x.r.cur>0||x.r.U.length); }
 function totals(who){ const G=homeGroups(who), R=G.map(x=>x.r);
   const put=SUM(R,r=>r.put), cur=SUM(R,r=>r.cur), gs=R.filter(r=>r.gain!=null), gain=SUM(gs,r=>r.gain);
   const f=[]; R.forEach(r=>{ if(r.h==="Bonds"){ bondsFor(who||WHO).forEach(b=>{ b.rows.concat(b.reps).forEach(t=>{ if(t.date) f.push([t.date,-t.amt]); }); b.open.forEach(e=>{ if(e.a>0) f.push([e.d>M.today?e.d:M.today,e.a]); }); }); }
     else r.U.forEach(u=>{ if(u.valued) f.push(...u.flows); }); });
   return {G,put,cur,gain,has:gs.length>0,x:xirr(f),egain:SUM(R,r=>r.egain||0)}; }
-function countUp(el,to,fmt){ const from=+el.dataset.v||0; el.dataset.v=to; if(HIDE||document.documentElement.classList.contains("calm")){ el.innerHTML=fmt(to); return; }
-  const t0=performance.now(), d=700; const step=now=>{ const k=Math.min(1,(now-t0)/d), e=1-Math.pow(1-k,3); el.innerHTML=fmt(from+(to-from)*e); if(k<1) requestAnimationFrame(step); }; requestAnimationFrame(step); }
-function paintFaces(T){
-  const big=n=>HIDE?"₹••••":esc(rs(n,false)), sz=n=>rs(n,false).length>10?" s":"";
-  $("f0").innerHTML=`<small>Invested</small><b class="num${sz(T.put)}" id="fv0"></b><i>${DATA?"money put in, net":"Loading…"}</i>`;
-  $("f1").innerHTML=`<small>Value today</small><b class="num${sz(T.cur)}" id="fv1"></b><i>${T.has?"latest values carried to today":"at cost until values arrive"}</i>`;
-  $("f2").innerHTML=`<small>Returns</small><b class="num ${cls(T.gain)}${sz(T.gain)}" id="fv2"></b><i>${T.x!=null?"XIRR "+pct(T.x)+" a year":"add values to see XIRR"}</i>`;
-  countUp($("fv0"),T.put,big); countUp($("fv1"),T.cur,big); countUp($("fv2"),T.gain,n=>HIDE?"₹••••":esc((n>0?"+":"")+rs(n,false)));
-  setFace(FACE,true); }
-function setFace(i,quiet){ FACE=(i+3)%3; $("cube").style.transform=`rotateX(${FACE*120}deg)`; $("dots").querySelectorAll("button").forEach((b,k)=>b.setAttribute("aria-pressed",String(k===FACE)));
-  if(!quiet&&M) drawLegend(); }
-function drawLegend(){ const T=totals(), base=FACE===0?T.put:T.cur;
-  $("legend").innerHTML=T.G.map(({h,r})=>{ const c=CLS[h], v=FACE===0?r.put:FACE===1?r.cur:(h==="Bonds"?(r.egain||0):r.gain||0), share=base?(FACE===0?r.put:r.cur)/base:0;
-    const sub=FACE===2?(h==="Bonds"?"expected":r.gain!=null?pct(r.base>0?r.gain/r.base:null):"—"):Math.round(share*100)+"%";
-    return `<button class="lg" data-c="${h}" style="--c:${c.col}"><small>${c.label}</small><b class="num ${FACE===2?cls(v):""}">${FACE===2?smoney(v,true):money(v,true)}</b><i>${esc(sub)}</i></button>`; }).join("")||`<div class="empty" style="grid-column:1/-1">${DATA?"Nothing here yet.":"Loading your investments…"}</div>`;
-  $("legend").querySelectorAll("[data-c]").forEach(b=>b.onclick=()=>openScr(b.dataset.c)); }
+const SCOPEL={all:"Overall",Stocks:"Stocks","Mutual Funds":"Funds",Bonds:"Bonds"}, SCOPEF={all:"Overall",Stocks:"Stocks","Mutual Funds":"Mutual funds",Bonds:"Bonds"};
+function figOf(T,sc){ if(sc==="all") return {put:T.put,cur:T.cur,gain:T.gain,has:T.has,x:T.x};
+  const g=T.G.find(x=>x.h===sc); if(!g) return {put:0,cur:0,gain:0,has:false,x:null}; const r=g.r, bond=sc==="Bonds";
+  return {put:r.put,cur:r.cur,gain:bond?(r.egain||0):(r.gain||0),has:bond||r.gain!=null,x:r.x,bond}; }
+const LAST={};
+function tween(el,key,to,fmt){ const from=key in LAST?LAST[key]:to; LAST[key]=to; if(HIDE||calm()||Math.abs(from-to)<1){ el.innerHTML=fmt(to); return; }
+  el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash");
+  const t0=performance.now(), d=600; const step=now=>{ const k=Math.min(1,(now-t0)/d), e=1-Math.pow(1-k,3); el.innerHTML=fmt(from+(to-from)*e); if(k<1&&el.isConnected) requestAnimationFrame(step); }; requestAnimationFrame(step); }
+function paintHero(){ const T=totals(); if(SCOPE!=="all"&&!T.G.some(x=>x.h===SCOPE)) SCOPE="all";
+  const f=figOf(T,SCOPE), nm=SCOPE==="all"?"":SCOPEF[SCOPE]+" · ", whose=WHO==="all"?"Everyone's":WHO+"'s";
+  $("f0").innerHTML=`<small>${nm}Invested</small><b class="num" id="fv0"></b><i>${DATA?`${whose} money put in`:"Loading…"}</i>`;
+  $("f1").innerHTML=`<small>${nm}Value today</small><b class="num" id="fv1"></b><i>${f.has?"What it's worth now":"Shown at cost until you add a value"}</i>`;
+  $("f2").innerHTML=`<small>${nm}${f.bond?"Expected profit":"Profit"}</small><b class="num ${cls(f.gain)}" id="fv2"></b><i>${f.x!=null?"Growing about "+pct(f.x).replace("+","")+" a year":f.bond?"Interest still to come":"Add today's value to see it"}</i>`;
+  const plain=n=>HIDE?"₹••••":esc(rs(n,false)), signed=n=>HIDE?"₹••••":esc((n>0?"+":"")+rs(n,false));
+  [f.put,f.cur,f.gain].forEach((v,i)=>{ const el=$("fv"+i); el.classList.toggle("s",rs(v,false).length>10); tween(el,"fv"+i,v,i===2?signed:plain); });
+  showFace(); }
+function showFace(){ document.querySelectorAll("#faces .fc").forEach((el,k)=>{ el.className="fc "+(k===FACE?"on":k<FACE?"l":"r"); });
+  $("meas").querySelectorAll("button").forEach((b,k)=>b.setAttribute("aria-pressed",String(k===FACE))); }
+function setFace(i){ const n=(i+3)%3; if(n===FACE) return; FACE=n; showFace(); drawTiles(); }
+function setScope(s){ if(s===SCOPE&&s!=="all"){ openScr(s); return; } SCOPE=s; paintHero(); drawTiles(); ringFocus(); }
+function ringFocus(){ if(S3.ringFocus) S3.ringFocus(SCOPE==="all"?null:SCOPE); document.querySelectorAll("#stage svg.flat [data-c]").forEach(n=>n.style.opacity=SCOPE==="all"||n.dataset.c===SCOPE?1:.22); }
+function drawTiles(){ const T=totals(), keys=["all"].concat(T.G.map(g=>g.h)), cols=`repeat(${keys.length},minmax(0,1fr))`, base=FACE===0?T.put:T.cur;
+  const colOf=k=>k==="all"?"var(--neon)":CLS[k].col;
+  $("scope").style.gridTemplateColumns=cols; $("legend").style.gridTemplateColumns=cols;
+  $("scope").innerHTML=keys.map(k=>`<button data-s="${k}" aria-pressed="${SCOPE===k}" style="--c:${colOf(k)}" aria-label="${SCOPEL[k]}"></button>`).join("");
+  $("legend").innerHTML=keys.map(k=>{ const f=figOf(T,k), v=FACE===0?f.put:FACE===1?f.cur:f.gain, share=k==="all"?"":FACE===2?(f.bond?"expected":""):base?Math.round(v/base*100)+"%":"";
+    return `<button class="lg" data-s="${k}" aria-pressed="${SCOPE===k}" style="--c:${colOf(k)}"><small>${SCOPEL[k]}</small><b class="num ${FACE===2?cls(v):""}">${FACE===2?smoney(v,true):money(v,true)}</b><i>${share||"&nbsp;"}</i></button>`; }).join("");
+  $("homeOpen").innerHTML=SCOPE==="all"?`<p class="hint">Swipe the number for value and profit · tap a box to see just that</p>`:`<button class="btn2 wide" id="openSc" style="border-color:${colOf(SCOPE)}">Open ${SCOPEF[SCOPE]} ›</button>`;
+  const o=$("openSc"); if(o) o.onclick=()=>openScr(SCOPE);
+  document.querySelectorAll("#legend [data-s],#scope [data-s]").forEach(b=>b.onclick=()=>setScope(b.dataset.s)); }
 function flatRing(G){ const tot=SUM(G,x=>x.r.cur)||1, R=72, C=2*Math.PI*R; let off=0;
-  return `<svg class="flat" viewBox="0 0 220 190" aria-hidden="true"><circle cx="110" cy="84" r="${R}" fill="none" stroke="rgba(255,255,255,.06)" stroke-width="22"/>${G.map(({h,r})=>{ const L=r.cur/tot*C; const s=`<circle cx="110" cy="84" r="${R}" fill="none" stroke="${CLS[h].col}" stroke-width="22" stroke-dasharray="${Math.max(0,L-2)} ${C}" stroke-dashoffset="${-off}" transform="rotate(-90 110 84)" data-c="${h}" style="cursor:pointer;filter:drop-shadow(0 0 6px ${CLS[h].col})"/>`; off+=L; return s; }).join("")}</svg>`; }
-function drawRing(){ const T=totals(), st=$("stage"), segs=T.G.filter(x=>x.r.cur>0).map(({h,r})=>({c:h,v:r.cur,col:CLS[h].col}));
-  const ok=S3.ok&&S3.ring(st,segs,c=>openScr(c));
-  const fl=st.querySelector("svg.flat"); if(!ok){ if(fl) fl.remove(); st.insertAdjacentHTML("afterbegin",flatRing(T.G.filter(x=>x.r.cur>0))); st.querySelectorAll("svg.flat [data-c]").forEach(n=>n.onclick=()=>openScr(n.dataset.c)); }
-  paintFaces(T); drawLegend(); }
+  return `<svg class="flat" viewBox="0 0 220 170" aria-hidden="true"><circle cx="110" cy="85" r="${R}" fill="none" stroke="rgba(255,255,255,.06)" stroke-width="22"/>${G.map(({h,r})=>{ const L=r.cur/tot*C; const s=`<circle cx="110" cy="85" r="${R}" fill="none" stroke="${CLS[h].col}" stroke-width="22" stroke-dasharray="${Math.max(0,L-2)} ${C}" stroke-dashoffset="${-off}" transform="rotate(-90 110 85)" data-c="${h}" style="cursor:pointer;transition:opacity .3s"/>`; off+=L; return s; }).join("")}</svg>`; }
+function drawRing(){ const T=totals(), st=$("stage"), G=T.G.filter(x=>x.r.cur>0), segs=G.map(({h,r})=>({c:h,v:r.cur,col:CLS[h].col}));
+  const use3d=S3.ok&&!calm(); st.classList.toggle("flatmode",!use3d);
+  const fl=st.querySelector("svg.flat"); if(fl) fl.remove();
+  if(use3d) S3.ring(st,segs,c=>openScr(c));
+  else { st.insertAdjacentHTML("beforeend",flatRing(G)); st.querySelectorAll("svg.flat [data-c]").forEach(n=>n.onclick=()=>openScr(n.dataset.c)); }
+  paintHero(); drawTiles(); ringFocus(); }
 function catLines(h,who,max){
   if(h==="Stocks"||h==="Mutual Funds"){ const H=holdFor(h,who).slice().sort((a,b)=>b.cur-a.cur); if(H.length) return {n:H.length,html:H.slice(0,max).map(holdRow).join("")};
     const F=fundsFromOrders(who,h); return {n:F.length,html:F.slice(0,max).map(fundOrderRow).join("")}; }
-  const L=bondsFor(who).filter(b=>!b.closed); return {n:L.length,html:L.slice(0,max).map(bondRow).join("")}; }
+  const L2=bondsFor(who).filter(b=>!b.closed); return {n:L2.length,html:L2.slice(0,max).map(bondRow).join("")}; }
 function drawList(){
   const el=$("ledger"), G=homeGroups(), tot=SUM(G,x=>x.r.cur);
   if(!G.length){ el.innerHTML=`<div class="empty">${DATA?"Nothing here yet.":"Loading your investments…"}</div>`; return; }
   const W=WHOS.map(w=>({w,v:SUM(HOME,h=>agg(h,w).cur)})), wt=SUM(W,x=>x.v)||1;
   let h=`<div class="grp">`+(WHO==="all"?`<div class="splits"><div class="split"><div class="lab">${W.map(x=>`<span>${x.w} <b class="num">${money(x.v,true)}</b> · ${Math.round(x.v/wt*100)}%</span>`).join("")}</div>
-    <div class="bar">${W.map(x=>`<i style="width:${x.v/wt*100}%;background:${WHOC[x.w]};box-shadow:0 0 10px ${WHOC[x.w]}"></i>`).join("")}</div></div></div>`:"");
-  G.forEach(({h:k,r})=>{ const c=CLS[k], open=OPENC.has(k), L=catLines(k,WHO,5), gp=r.gain!=null&&r.base>0?r.gain/r.base:null;
+    <div class="bar">${W.map(x=>`<i style="width:${x.v/wt*100}%;background:${WHOC[x.w]}"></i>`).join("")}</div></div></div>`:"");
+  G.forEach(({h:k,r})=>{ const c=CLS[k], open=OPENC.has(k), L2=catLines(k,WHO,5), gp=r.gain!=null&&r.base>0?r.gain/r.base:null;
     h+=`<div class="cat" data-c="${k}" aria-expanded="${open}"><button aria-expanded="${open}"><svg class="chev" viewBox="0 0 14 14"><path d="M3 5l4 4 4-4"/></svg><span class="cic">${svgI(c.icon,c.col)}</span>
-      <span class="cname"><span>${c.label}<span class="sub">${money(r.put,true)} in · ${tot?Math.round(r.cur/tot*100):0}% of value</span></span>${L.n?`<span class="badge num">${L.n}</span>`:""}</span>
+      <span class="cname"><span>${c.label}<span class="sub">${money(r.put,true)} put in · ${tot?Math.round(r.cur/tot*100):0}% of value</span></span>${L2.n?`<span class="badge num">${L2.n}</span>`:""}</span>
       <span class="amt num">${money(r.cur,true)}${r.gain!=null?`<small class="${cls(r.gain)}">${smoney(r.gain,true)}${gp!=null?" · "+pct(gp):""}</small>`:""}</span></button>
-      ${open?`<div style="padding-left:14px">${L.html}<button class="more" data-open="${k}">Open ${c.label} ›</button></div>`:""}</div>`; });
+      ${open?`<div style="padding-left:14px">${L2.html}<button class="more" data-open="${k}">Open ${c.label} ›</button></div>`:""}</div>`; });
   el.innerHTML=h+`</div>`;
   el.querySelectorAll(".cat>button").forEach(b=>b.onclick=()=>{ const k=b.parentElement.dataset.c; OPENC.has(k)?OPENC.delete(k):OPENC.add(k); drawList(); });
   el.querySelectorAll("[data-open]").forEach(b=>b.onclick=()=>openScr(b.dataset.open));
   bindRows(el);
 }
-function npsRow(){ const r=agg("Others",WHO); if(!r.U.length){ $("npsRow").innerHTML=""; return; }
-  $("npsRow").innerHTML=`<button class="nps" id="npsBtn"><span class="oi">${svgI("nps",CLS.NPS.col)}</span><span class="t"><b>NPS</b><small>Not counted in totals${r.asof?" · value "+fmtDs(r.asof):""}</small></span><span class="v num">${money(r.cur,true)} ›</span></button>`;
-  $("npsBtn").onclick=()=>openScr("NPS"); }
 function renderHome(){
   document.body.classList.toggle("mask",HIDE);
   $("whos").querySelectorAll("button").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.w===WHO)));
-  const list=VIEW==="list"; $("homeRing").hidden=list; $("ledger").hidden=!list; $("chartHint").hidden=list;
+  const list=VIEW==="list"; $("homeRing").hidden=list; $("ledger").hidden=!list;
   $("viewList").setAttribute("aria-pressed",String(list)); $("viewRing").setAttribute("aria-pressed",String(!list));
-  if(list) drawList(); else drawRing(); npsRow(); paintBell();
+  if(list) drawList(); else drawRing(); paintBell();
 }
 $("segv").onclick=e=>{ const b=e.target.closest("button"); if(!b) return; VIEW=b.id==="viewList"?"list":"chart"; store.set("view",VIEW); renderHome(); };
-$("faceTap").onclick=()=>{ setFace(FACE+1); };
-(()=>{ let y0=null; const ft=$("faceTap"); ft.addEventListener("touchstart",e=>{ y0=e.touches[0].clientY; },{passive:true});
-  ft.addEventListener("touchend",e=>{ if(y0==null) return; const dy=e.changedTouches[0].clientY-y0; y0=null; if(Math.abs(dy)>24){ e.preventDefault(); setFace(FACE+(dy<0?1:-1)); } }); })();
-$("dots").querySelectorAll("button").forEach(b=>b.onclick=()=>setFace(+b.dataset.f));
+(()=>{ const h=$("hero"); let x0=null,y0=null,sw=0;
+  h.addEventListener("touchstart",e=>{ x0=e.touches[0].clientX; y0=e.touches[0].clientY; },{passive:true});
+  h.addEventListener("touchend",e=>{ if(x0==null) return; const dx=e.changedTouches[0].clientX-x0, dy=e.changedTouches[0].clientY-y0; x0=null;
+    if(Math.abs(dx)>36&&Math.abs(dx)>Math.abs(dy)*1.2){ sw=Date.now(); setFace(FACE+(dx<0?1:-1)); } });
+  $("faces").onclick=()=>{ if(Date.now()-sw<500) return; setFace(FACE+1); };
+  $("meas").querySelectorAll("button").forEach((b,k)=>b.onclick=()=>setFace(k)); })();
 $("whos").querySelectorAll("button").forEach(b=>b.onclick=()=>setWho(b.dataset.w));
-function setWho(w){ WHO=w; store.set("who",w); refresh(); }
+function setWho(w){ if(w===WHO) return; WHO=w; store.set("who",w); refresh(); }
 
 /* ---------- rows used everywhere ---------- */
 function holdRow(h,k){ const gp=h.inv>0?h.gain/h.inv:null, isMF=h.a==="Mutual Funds";
@@ -332,7 +349,7 @@ let SC=null; const ACT=new Set();
 const TABS3={Stocks:["Holdings","Growth","Activity"],"Mutual Funds":["Holdings","Growth","Activity"],Bonds:["Bonds","Payouts","Activity"],NPS:["Growth","Activity"]};
 const scrHead=(t,sub)=>`<div class="hd"><button class="ib" data-back aria-label="Back"><svg viewBox="0 0 24 24"><path d="M19 12H5M11 6l-6 6 6 6"/></svg></button><h2>${esc(t)}</h2>${sub||""}</div>`;
 function openScr(h,opts){ SC=Object.assign({h,tab:(TABS3[h]||[])[0]||"",sort:"value"},opts||{}); ACT.clear(); S3.theme(h==="pol"?"ins":h); renderScr();
-  if(!isOpen($("scr"))) ov.open($("scr"),()=>{ $("scr").hidden=true; SC=null; S3.theme(TAB_NOW==="ins"?"ins":"home"); upCheck(); }); else { $("scr").style.animation="none"; void $("scr").offsetWidth; $("scr").style.animation=""; }
+  if(!isOpen($("scr"))) ov.open($("scr"),()=>{ vanish($("scr")); SC=null; S3.theme(TAB_NOW==="ins"?"ins":"home"); upCheck(); }); else { const b=$("scrBody"); b.classList.remove("swap"); void b.offsetWidth; b.classList.add("swap"); }
   $("scrBody").scrollTop=0; upCheck(); }
 function sumCard(h,r){ const col=CLS[h].col;
   if(h==="Bonds") return `<div class="sumc tilt" style="--c:${col}"><div class="l">Money in active bonds</div><div class="v num">${money(r.cur,false)}</div><div class="s">Expected gain ${smoney(r.egain||0,true)} · XIRR ${pct(r.x)} incl. repayments to come</div>
@@ -374,14 +391,14 @@ function bindScr(B){ const dk=$("scrDock");
 function doAct(a,el){
   const h=SC&&SC.h, inv=WHO==="all"?null:WHO;
   if(a==="add") openAdd("in",{a:h==="NPS"?"NPS":h,inv:h==="NPS"?"Aditya":inv});
-  else if(a==="npsval") npsValue();
+  else if(a==="npsval") openValues("NPS");
   else if(a==="vals") openValues(h);
   else if(a==="bell") openBell();
   else if(a==="pol-renew") policyUpload(SC.id,"renew");
   else if(a==="pol-doc") policyUpload(SC.id,"doc");
   else if(a==="pol-read") policyRead(SC.id,el&&el.dataset.term);
   else if(a==="pol-edit") editPolicy(SC.id,el&&el.dataset.term);
-  else if(a==="pol-labels") openLabels();
+  else if(a==="term-prem") openAdd("in",{cat:TERM});
 }
 /* 3D tilt on the summary cards */
 function tiltAll(root){ root.querySelectorAll(".tilt").forEach(el=>{ if(el._t) return; el._t=1;
@@ -514,7 +531,7 @@ function payoutChart(el){
 }
 
 /* ---------- bottom sheets ---------- */
-function openE(html){ $("eBox").innerHTML=html; if(!isOpen($("eSheet"))) ov.open($("eSheet"),()=>{ $("eSheet").hidden=true; }); else { $("eBox").style.animation="none"; void $("eBox").offsetWidth; $("eBox").style.animation=""; } $("eBox").scrollTop=0;
+function openE(html){ $("eBox").innerHTML=html; if(!isOpen($("eSheet"))) ov.open($("eSheet"),()=>{ vanish($("eSheet")); }); else { const b=$("eBox"); b.classList.remove("swap"); void b.offsetWidth; b.classList.add("swap"); } $("eBox").scrollTop=0;
   $("eBox").querySelectorAll("[data-close]").forEach(x=>x.onclick=()=>ov.back()); bindRows($("eBox")); }
 $("eSheet").addEventListener("click",e=>{ if(e.target===$("eSheet")) ov.back(); });
 const dl=F=>`<dl class="elist">${F.filter(Boolean).map(([k,v])=>`<dt>${esc(k)}</dt><dd>${v}</dd>`).join("")}</dl>`;
@@ -551,7 +568,9 @@ function bondSheet(key){ const b=M.bonds.find(x=>x.key===key); if(!b) return; co
     ${dl([["Status",b.closed?"Repaid":b.next?(b.next.d<=today?"Repayment due":"Active"):"Active"],["Investor",esc(b.who)],["Platform",esc(b.platL)],["Bought",fmtD(b.date)],info.rate?["Rate",esc(info.rate)]:null,b.exp?["Expected back (before TDS)",money(b.exp,false)]:null,["Received so far",money(b.repaid,false)],
       b.tds?["TDS deducted so far",money(b.tds,false)]:null,gain==null?null:[b.closed?"Gain":"Expected gain",`<span class="${cls(gain)}">${smoney(gain)}</span>`],b.mat?["Ends",fmtD(b.mat)]:null,b.note?["Note",esc(b.note)]:null,info.src?["Schedule from",esc(info.src)]:null])}
     ${sch?`<div class="gh"><span>Repayment dates</span><b class="num">${b.sched.filter(e=>e.done).length}/${b.sched.length}</b></div><div class="list">${sch}</div>`:""}
-    <div class="btns"><button class="x" type="button" id="bShot">Read schedule from screenshots</button><button class="go" type="button" id="bRec">Record repayment</button></div>${closeBtn}`);
+    ${b.closed?"":`<button class="x" type="button" id="bCalT">${svgI("cal","var(--neon)",15)} ${info.remind==="cal"?"Google Calendar alerts are on · turn off":"Add Google Calendar alerts for these dates"}</button>`}
+    <div class="btns"><button class="x" type="button" id="bShot">Read dates from screenshots</button><button class="go" type="button" id="bRec">Record repayment</button></div>${closeBtn}`);
+  const ct=$("bCalT"); if(ct) ct.onclick=()=>{ ov.back(); setBondRemind(b,info.remind!=="cal"); };
   $("bRec").onclick=()=>openPrompt(b,b.next||{d:today,a:0,p:0,i:0},true);
   $("bShot").onclick=()=>pickFiles("image/*,application/pdf",files=>sendInbox("bond",{bondKey:b.key,name:b.name,cat:b.cat,who:b.who,platform:b.plat,amount:b.cost,date:b.date,existing:true},files,"Schedule for "+b.name)); }
 function openGain(){ const R=HOME.map(h=>agg(h,WHO)).filter(r=>r.U.length);
@@ -574,8 +593,8 @@ function openBell(){ const B=bellItems(), wait=B.ib.filter(r=>r.d.status==="new"
   if(wait.length) h+=`<div class="gh"><span>Waiting for Claude</span><b class="num">${wait.length}</b></div><div class="list">${wait.map(inboxRow).join("")}</div><button class="ai" id="bProc">${svgI("spark","var(--neon2)")}<span><b>Process now</b><small>Opens a new chat in your Artha project; send the message that's copied for you</small></span></button>`;
   if(B.soon.length) h+=`<div class="gh"><span>Coming up · 30 days</span><b class="num">${money(SUM(B.soon,x=>x.e.a),true)}</b></div><div class="list">${B.soon.map(x=>row(x,"soon")).join("")}</div>`;
   if(!B.due.length&&!B.ib.length&&!B.ren.length&&!B.soon.length) h+=`<div class="empty">All clear. Nothing needs you right now.</div>`;
-  h+=`<button class="x" type="button" id="bCal">${svgI("cal","var(--neon)",16)} Sync reminders to Google Calendar</button>${closeBtn}`;
-  openE(h); const pb=$("bProc"); if(pb) pb.onclick=processNow; $("bCal").onclick=()=>{ syncAllReminders(); }; }
+  h+=closeBtn;
+  openE(h); const pb=$("bProc"); if(pb) pb.onclick=processNow; }
 $("bellBtn").onclick=openBell;
 
 /* ---------- repayments: amount that reached the bank + 10% TDS on the interest part ---------- */
@@ -602,20 +621,18 @@ function openPrompt(b,e,manual){ const today=M.today, sp=splitOf(b,e), expNet=Ma
     if(!manual) OUT.push({kind:"cal",ops:[{key:"rp:"+b.key+"|"+e.d,del:true}]});
     saveOut(); ov.back(); refresh(); showToast(`${rs(r.gross,false)} recorded for ${b.name}${r.tds?" (incl. "+rs(r.tds,false)+" TDS)":""}`); flush(); }; }
 
-/* ---------- Google Calendar reminders ---------- */
-function reminderOps(){ const ops=[];
-  M.bonds.filter(b=>!b.closed).forEach(b=>b.open.filter(e=>e.d>=M.today).forEach(e=>ops.push({key:"rp:"+b.key+"|"+e.d,title:`Bond repayment: ${b.name}`,date:e.d,desc:`${b.name} (${b.platL}) should pay about ${rs(e.a||0,false)} before TDS.`})));
-  renewals(4000).filter(x=>x.left>=0).forEach(x=>{ const d=addDays(x.end,-15)<M.today?M.today:addDays(x.end,-15); ops.push({key:"ins:"+x.pol.id+"|"+x.end,title:`Renew insurance: ${x.pol.d.title}`,date:d,desc:`${x.pol.d.title} ends on ${fmtD(x.end)}.`}); });
-  const tc=M.term, np=tc&&nextPremium(tc); if(np&&np.date>=M.today) ops.push({key:"term|"+np.date,title:"Term insurance premium due",date:np.date,desc:`About ${rs(np.amt,false)}.`});
-  return ops; }
-function syncAllReminders(){ if(!M.v2){ showToast("Update the Artha backend first (see the setup note)",4500); return; }
-  const done=store.get("calDone",{}), ops=reminderOps().filter(o=>done[o.key]!==o.date);
-  if(!ops.length){ showToast("Google Calendar already has every reminder"); return; }
-  ops.forEach(o=>done[o.key]=o.date); store.set("calDone",done);
-  for(let i=0;i<ops.length;i+=15) OUT.push({kind:"cal",ops:ops.slice(i,i+15)});
-  saveOut(); flush(); showToast(`Adding ${ops.length} reminder${ops.length>1?"s":""} to Google Calendar`,3500); }
-function autoReminders(){ if(!M||!M.v2||!PW()) return; const done=store.get("calDone",{}), ops=reminderOps().filter(o=>done[o.key]!==o.date); if(!ops.length) return;
-  ops.forEach(o=>done[o.key]=o.date); store.set("calDone",done); for(let i=0;i<ops.length;i+=15) OUT.push({kind:"cal",ops:ops.slice(i,i+15)}); saveOut(); }
+/* ---------- reminders: asked when a bond or policy is added ---------- */
+function bondCal(key,name,plat,S){ return S.filter(e=>e.d>=M.today).map(e=>({key:"rp:"+key+"|"+e.d,title:`Bond repayment: ${name}`,date:e.d,desc:`${name}${plat?" ("+plat+")":""} should pay about ${rs(e.a||((e.p||0)+(e.i||0)),false)} before TDS.`})); }
+function queueCal(ops){ for(let i=0;i<ops.length;i+=15) OUT.push({kind:"cal",ops:ops.slice(i,i+15),rid:rid()}); }
+const remindPref=()=>store.get("remind","cal");
+function remindSeg(id,cur,label){ return `<div class="fld"><span>${label||"Remind me on these dates"}</span><div class="seg sm" id="${id}"><button type="button" data-v="cal" aria-pressed="${cur==="cal"}">${svgI("cal","currentColor",14)} Google Calendar alert</button><button type="button" data-v="app" aria-pressed="${cur!=="cal"}">Only in Artha</button></div></div>`; }
+function bindRemind(id,set){ const el=$(id); if(!el) return; el.querySelectorAll("[data-v]").forEach(b=>b.onclick=()=>{ el.querySelectorAll("[data-v]").forEach(x=>x.setAttribute("aria-pressed",String(x===b))); set(b.dataset.v); store.set("remind",b.dataset.v); }); }
+function setBondRemind(b,on){ const R=M.rec.get("bond:"+b.key), d=Object.assign({},R?R.d:{},{remind:on?"cal":"app"});
+  OUT.push({kind:"rec",ops:[{id:"bond:"+b.key,kind:"bond",title:b.name,data:d}],rid:rid()});
+  queueCal(on?bondCal(b.key,b.name,b.platL,b.open):b.open.map(e=>({key:"rp:"+b.key+"|"+e.d,del:true}))); saveOut(); flush(); refresh();
+  showToast(on?"Google Calendar alerts added for the repayment dates":"Calendar alerts removed"); }
+function polCal(pid,title,end,on){ if(!end) return []; const d=addDays(end,-15)<M.today?M.today:addDays(end,-15);
+  return [on?{key:"ins:"+pid,title:`Renew insurance: ${title}`,date:d,desc:`${title} ends on ${fmtD(end)}.`}:{key:"ins:"+pid,del:true}]; }
 
 /* ---------- values ---------- */
 function npsValue(){ const c=M.tabs.find(t=>t.name==="NPS"); if(!c) return; const r=agg("Others","Aditya");
@@ -626,14 +643,15 @@ function npsValue(){ const c=M.tabs.find(t=>t.name==="NPS"); if(!c) return; cons
   const i=$("nV"); i.oninput=()=>{ const raw=i.value.replace(/[^\d]/g,"").slice(0,11); i.value=raw?Number(raw).toLocaleString("en-IN"):""; }; setTimeout(()=>i.focus(),120);
   $("nOk").onclick=()=>{ const v=Number(i.value.replace(/[^\d]/g,"")), d=$("nD").value; if(!(v>0)){ $("nErr").textContent="Type the value."; return; }
     OUT.push({kind:"value",p:{cat:"NPS",date:d,value:v,rid:rid()}}); saveOut(); ov.back(); refresh(); showToast("NPS value saved"); flush(); }; }
-const TABLBL={[MAIN]:"Aditya · Stocks (own Groww)",[PIKUL]:"Aditya · in Spardha's account (stocks + bonds there)","Mutual Funds":"Aditya · Mutual funds","Bonds":"Aditya · Bonds",[SPO]:"Spardha · Mutual funds","NPS":"Aditya · NPS"};
-function openValues(h){ const rows=M.tabs.filter(c=>!c.protect&&(c.T.length||c.lv)&&(!h||c.T.some(t=>t.h===h))), vals={};
-  openE(`<div class="t big">Update values</div><div class="s" style="text-align:left">Type today's value from Groww, Wint, NPS. Empty boxes keep the last value, carried forward with money added since.</div>
-    <div class="list">${rows.map(c=>`<label class="vrow"><span><b>${esc(TABLBL[c.name]||c.name)}</b><small>${c.lv?`Last ${money(c.lv.value,true)} · ${fmtDs(c.lv.date)}`:"No value yet"}</small></span><input inputmode="numeric" data-vc="${esc(c.name)}" placeholder="₹ today"></label>`).join("")}</div>
+const VLBL={[MAIN]:["Stocks","Aditya's own Groww","Stocks"],[PIKUL]:["Stocks and bonds","Aditya's money in Spardha's account","Stocks"],"Mutual Funds":["Mutual funds","Aditya","Mutual Funds"],"Bonds":["Bonds","Aditya","Bonds"],[SPO]:["Mutual funds","Spardha's own","Mutual Funds"],"NPS":["NPS","Aditya · not in totals","NPS"]};
+function openValues(h){ const rows=M.tabs.filter(c=>!c.protect&&(c.T.length||c.lv)&&(!h||c.T.some(t=>t.h===h||(h==="NPS"&&t.a==="NPS")))), vals={};
+  openE(`<div class="t big">Update today's values</div><div class="s" style="text-align:left">Open Groww, Wint or the NPS app and type what each one is worth today. Leave a box empty to keep the last value.</div>
+    <div class="vcards">${rows.map((c,k)=>{ const [t,sub,cl]=VLBL[c.name]||[c.name,"","Stocks"], col=CLS[cl].col;
+      return `<label class="vcard" style="--c:${col};--k:${k}"><span class="av" style="background:${col}">${svgI(CLS[cl].icon,"#fff",18)}</span><span class="vt"><b>${esc(t)}</b><small>${esc(sub)}</small><small class="num">${c.lv?`Last ${money(c.lv.value,true)} · ${fmtDs(c.lv.date)}`:"No value yet"}</small></span><span class="vin"><i>₹</i><input inputmode="numeric" data-vc="${esc(c.name)}" placeholder="Today"></span></label>`; }).join("")}</div>
     <div class="err" id="vErr"></div><button class="go" type="button" id="vOk">Save values</button>${closeBtn}`);
   $("eBox").querySelectorAll("[data-vc]").forEach(i=>i.oninput=()=>{ const raw=i.value.replace(/[^\d]/g,"").slice(0,11); vals[i.dataset.vc]=raw; i.value=raw?Number(raw).toLocaleString("en-IN"):""; });
-  $("vOk").onclick=()=>{ const L=Object.entries(vals).filter(([,v])=>v); if(!L.length){ $("vErr").textContent="Type at least one value."; return; }
-    L.forEach(([cat,v])=>OUT.push({kind:"value",p:{cat,date:M.today,value:Number(v),rid:rid()}})); saveOut(); ov.back(); refresh(); showToast(`Saved ${L.length} value${L.length>1?"s":""}`); flush(); }; }
+  $("vOk").onclick=()=>{ const L2=Object.entries(vals).filter(([,v])=>v); if(!L2.length){ $("vErr").textContent="Type at least one value."; return; }
+    L2.forEach(([cat,v])=>OUT.push({kind:"value",p:{cat,date:M.today,value:Number(v),rid:rid()}})); saveOut(); ov.back(); refresh(); showToast(`Saved ${L2.length} value${L2.length>1?"s":""}`); flush(); }; }
 
 /* ---------- files → Drive, and the Claude inbox ---------- */
 function pickFiles(accept,cb,multi){ const fi=$("fileIn"); fi.accept=accept; fi.multiple=multi!==false; fi.value=""; fi.onchange=()=>{ const F=[...fi.files]; if(F.length) cb(F); }; fi.click(); }
@@ -681,8 +699,9 @@ function reviewBond(r){ const d=r.d, x=d.res||{}, c=d.ctx||{}, S=(x.sched||[]).m
     <div class="btns"><label class="fld"><span>Invested (₹)</span><input id="bA" inputmode="numeric" value="${amt||""}" ${c.existing?"disabled":""}></label><label class="fld"><span>On</span><input id="bD" type="date" value="${esc(x.investedOn||c.date||M.today)}" ${c.existing?"disabled":""}></label></div>
     ${dl([["Platform",esc(x.platform||c.platform||"—")],x.rate?["Rate",esc(x.rate)]:null,x.bondId?["Bond ID",esc(x.bondId)]:null,["Repayments",String(S.length)],["Principal back",money(P,false)],["Interest (before TDS)",money(I,false)],["Expected gain",`<span class="${cls(gain)}">${smoney(gain)}</span>`],["TDS at 10% of interest",money(I*.1,false)]])}
     <div class="list" style="max-height:34vh">${S.map(e=>`<div class="hl"><span class="av" style="background:${CLS.Bonds.col};color:#111">${dOf(e.d).getDate()}</span><div><div class="n">${fmtD(e.d)}</div><div class="m">Principal ${esc(rs(e.p,false))} · interest ${esc(rs(e.i,false))}</div></div><div class="r"><b class="num">${money(e.p+e.i,true)}</b></div></div>`).join("")||`<div class="empty">No dates were found. Remove this and try clearer screenshots.</div>`}</div>
-    ${x.notes?`<div class="s" style="text-align:left">${esc(x.notes)}</div>`:""}<div class="err" id="bErr"></div>
+    ${x.notes?`<div class="s" style="text-align:left">${esc(x.notes)}</div>`:""}${remindSeg("bRem",remindPref(),"Remind me on the repayment dates")}<div class="err" id="bErr"></div>
     <button class="go" type="button" id="bOk">${c.existing?"Save this schedule":"Save the bond"}</button><div class="btns"><button class="x" type="button" id="bDel">Discard</button>${closeBtn}</div>`);
+  let rem=remindPref(); bindRemind("bRem",v=>rem=v);
   $("bDel").onclick=()=>{ inboxDone(r.id,"removed"); ov.back(); refresh(); };
   $("bOk").onclick=()=>{ const name=$("bN").value.trim(), A=numIn($("bA").value), D=$("bD").value;
     if(!name){ $("bErr").textContent="Type the bond's name."; return; } if(!S.length){ $("bErr").textContent="There are no repayment dates to save."; return; }
@@ -690,8 +709,9 @@ function reviewBond(r){ const d=r.d, x=d.res||{}, c=d.ctx||{}, S=(x.sched||[]).m
     if(!c.existing){ if(!(A>0)){ $("bErr").textContent="Type the amount invested."; return; }
       const tcat=M.tabs.find(k=>k.name===cat)||{fields:[]};
       OUT.push({kind:"add",p:{cat,kind:"in",date:D,amount:A,type:(tcat.fields||[]).includes("type")?"Bond":"",plat:x.platform||c.platform||"",name,bid:x.bondId||"",mat:S[S.length-1].d,exp:Math.round(P+I),note:("[Repay "+S.map(e=>e.d+":"+Math.round(e.p+e.i)).join(" | ")+"]"),rid:rid()}}); }
-    OUT.push({kind:"rec",ops:[{id:"bond:"+key,kind:"bond",title:name,data:{sched:S,rate:x.rate||"",bondId:x.bondId||"",src:"Claude · screenshots "+M.today,gain:Math.round(gain)}}],rid:rid()});
-    inboxDone(r.id); saveOut(); ov.back(); refresh(); autoReminders(); flush(); showToast(`${name} saved with ${S.length} repayment dates`); }; }
+    OUT.push({kind:"rec",ops:[{id:"bond:"+key,kind:"bond",title:name,data:{sched:S,rate:x.rate||"",bondId:x.bondId||"",src:"Claude · screenshots "+M.today,gain:Math.round(gain),remind:rem}}],rid:rid()});
+    if(rem==="cal") queueCal(bondCal(key,name,x.platform||c.platform||"",S.map(e=>({d:e.d,a:e.p+e.i}))));
+    inboxDone(r.id); saveOut(); ov.back(); refresh(); flush(); showToast(`${name} saved with ${S.length} repayment dates`); }; }
 
 /* ---------- INSURANCE ---------- */
 const LBL0={ins_title:"Insurance",sec_current:"This year's policy",sec_covered:"What's covered",sec_not:"Not covered",sec_excl:"Exclusions",sec_high:"Key points",sec_extra:"More details",sec_docs:"Documents",sec_hist:"Previous years",sec_prem:"Premiums",
@@ -728,13 +748,13 @@ function renderIns(){ const el=$("viewIns"); if(!M) return; const P=policies();
     const meta=x.p.d.link==="term"?`${M.term.T.length} of 60 premiums paid${termP?" · next "+fmtDs(termP.date):""}`:[x.c&&x.c.d.insurer,x.p.d.insured,x.end?"ends "+fmtDs(x.end):"add this year's policy"].filter(Boolean).join(" · ");
     return `<button class="pcard" data-pol="${esc(x.p.id)}" style="--c:${col};--k:${k}"><span class="pi">${svgI(polIcon(x.p),col)}</span><div style="min-width:0"><div class="n">${esc(x.p.d.title)}</div><div class="m">${esc(meta)}</div><div class="m">${st} ${x.cover?`<span class="num" style="color:var(--ink)">${money(x.cover,true)}</span> ${esc(L("cover_"+x.p.d.type))}`:""}</div></div><div class="r">${x.left!=null?dring(x.left,x.total,col):""}</div></button>`; }).join("")
     ||`<div class="emptyc">${svgI("shield","var(--neon)")}<b>Add your first policy</b><p>Health, car, scooter, your father's car — upload the policy and Claude reads the dates, cover and exclusions for you.</p></div>`;
-  h+=`<div class="dock2" style="position:static;background:none;padding:14px 0 0"><div class="in"><button class="btn2" id="insLbl">Rename labels</button><button class="btn1" id="insAdd">Add policy</button></div></div>`;
+  h+=`<div class="dock2" style="position:static;background:none;padding:14px 0 0"><div class="in one"><button class="btn1" id="insAdd">+ Add a policy</button></div></div>`;
   el.innerHTML=h; tiltAll(el); bindRows(el);
   const pr=$("insProc"); if(pr) pr.onclick=processNow;
   el.querySelectorAll("#insChips [data-f]").forEach(b=>b.onclick=()=>{ INSF=b.dataset.f; store.set("insf",INSF); renderIns(); });
-  $("insAdd").onclick=()=>addPolicy(); $("insLbl").onclick=openLabels; }
-function openPolicy(id){ openScr("pol",{id}); }
-function renderPolicy(){ const p=policies().find(x=>x.id===SC.id); const B=$("scrBody"), dk=$("scrDock"); if(!p){ ov.back(); return; }
+  $("insAdd").onclick=()=>addPolicy(); }
+function openPolicy(id){ if(!policies().some(x=>x.id===id)){ showToast("That policy is still syncing. Try again in a moment."); return; } openScr("pol",{id}); }
+function renderPolicy(){ const p=policies().find(x=>x.id===SC.id); const B=$("scrBody"), dk=$("scrDock"); if(!p){ if(isOpen($("scr"))) ov.back(); return; }
   const col=polCol(p), cur=p.d.link==="term"?null:currentTerm(p.id), T=termsOf(p.id), hist=T.filter(t=>t!==cur), d=cur?cur.d:{};
   let x=scrHead(p.d.title,`<button class="ib" data-act="pol-edit" data-term="${cur?esc(cur.id):""}" aria-label="Edit">${svgI("edit","var(--neon)")}</button>`);
   if(p.d.link==="term"){ const tc=M.term, np=nextPremium(tc), paid=SUM(tc.T,t=>t.amt), n=tc.T.length;
@@ -752,27 +772,73 @@ function renderPolicy(){ const p=policies().find(x=>x.id===SC.id); const B=$("sc
     x+=`<div class="sect"><h5>${esc(L("sec_extra"))}<button class="edl" data-act="pol-edit" data-term="${esc(cur.id)}">Edit</button></h5><dl class="kvs">${kv.filter(([,v])=>v).map(([k,v])=>`<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")||`<dt>Nothing yet</dt><dd></dd>`}</dl></div>`;
     x+=`<div class="sect"><h5>${esc(L("sec_docs"))} · ${esc(yearOf(cur))}<button class="edl" data-act="pol-doc">Add</button></h5>${(d.docs||[]).map(docRow).join("")||`<div class="s">No documents yet.</div>`}</div>`; }
   if(hist.length) x+=`<div class="gh"><span>${esc(L("sec_hist"))}</span><b class="num">${hist.length}</b></div>`+hist.map(t=>`<div class="sect"><h5>${esc(yearOf(t))}<button class="edl" data-act="pol-edit" data-term="${esc(t.id)}">Edit</button></h5><dl class="kvs">${[[L("f_insurer"),t.d.insurer],[L("f_premium"),t.d.premium?rs(+t.d.premium,false):""],[L("cover_"+p.d.type),t.d.cover?rs(+t.d.cover,false):""]].filter(([,v])=>v).map(([k,v])=>`<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}</dl>${(t.d.docs||[]).map(docRow).join("")}</div>`).join("");
-  B.innerHTML=x; dk.innerHTML=`<div class="in"><button class="btn2" data-act="pol-doc">Add document</button><button class="btn1" data-act="pol-renew">${cur?"Upload new year's policy":"Upload policy"}</button></div>`;
+  B.innerHTML=x; dk.innerHTML=p.d.link==="term"?`<div class="in"><button class="btn2" data-act="pol-doc">Add document</button><button class="btn1" data-act="term-prem">Add premium</button></div>`:`<div class="in"><button class="btn2" data-act="pol-doc">Add document</button><button class="btn1" data-act="pol-renew">${cur?"Add next year's policy":"Add this year's policy"}</button></div>`;
   bindScr(B); const pp=$("pProc"); if(pp) pp.onclick=processNow; }
 const yearOf=t=>t.d.start?`${t.d.start.slice(0,4)}–${(t.d.end||"").slice(2,4)||"?"}`:t.d.created?"Added "+fmtDs(t.d.created):"Undated";
 const docRow=f=>`<a class="doc" href="${esc(f.url)}" target="_blank" rel="noopener">${svgI("file","var(--neon)")}<span>${esc(f.label||f.name)}</span><small>${f.size?Math.max(1,Math.round(f.size/1024))+" KB":""}</small></a>`;
-function addPolicy(pre){ const st={type:(pre&&pre.type)||"health",title:"",insured:"",holder:"Aditya"};
-  const draw=()=>{ openE(`<div class="t big">New policy</div>
-    <div class="fld"><span>Type</span><div class="seg sm" id="npT">${PTYPES.map(t=>`<button type="button" data-v="${t}" aria-pressed="${st.type===t}">${esc(L("t_"+t))}</button>`).join("")}</div></div>
-    <label class="fld"><span>Name it</span><input id="npN" value="${esc(st.title)}" placeholder="${st.type==="car"?"Creta car":st.type==="bike"?"Activa scooter":st.type==="health"?"Family health":"Policy name"}"></label>
-    <label class="fld"><span>${esc(L("f_insured"))} (person or vehicle)</span><input id="npI" value="${esc(st.insured)}"></label>
-    <div class="fld"><span>${esc(L("f_holder"))}</span><div class="seg sm" id="npH">${["Aditya","Spardha","Father","Other"].map(v=>`<button type="button" data-v="${v}" aria-pressed="${st.holder===v}">${v}</button>`).join("")}</div></div>
-    <div class="err" id="npE"></div><button class="go" type="button" id="npUp">${svgI("spark","#03100e",16)} Upload policy · Claude reads it</button><button class="x" type="button" id="npMan">Enter details myself</button>`);
-    const keep=()=>{ st.title=$("npN").value.trim(); st.insured=$("npI").value.trim(); };
-    $("npT").querySelectorAll("[data-v]").forEach(b=>b.onclick=()=>{ keep(); st.type=b.dataset.v; draw(); });
-    $("npH").querySelectorAll("[data-v]").forEach(b=>b.onclick=()=>{ keep(); st.holder=b.dataset.v; draw(); });
-    const save=()=>{ keep(); if(!st.title){ $("npE").textContent="Give the policy a name."; return null; } const id="pol-"+rid();
-      OUT.push({kind:"rec",ops:[{id,kind:"pol",title:st.title,data:{title:st.title,type:st.type,insured:st.insured,holder:st.holder,created:M.today}}],rid:rid()}); saveOut(); build(); return id; };
-    $("npUp").onclick=()=>{ const id=save(); if(!id) return; flush(); policyUpload(id,"renew"); };
-    $("npMan").onclick=()=>{ const id=save(); if(!id) return; flush(); ov.back(); refresh(); setTimeout(()=>{ openPolicy(id); editPolicy(id,""); },120); }; };
+/* one simple form for adding, renewing and editing a policy */
+function addPolicy(){ policyForm(null,null,{}); }
+function editPolicy(pid,tid){ policyForm(pid,tid||"",{}); }
+function policyForm(pid,tid,opt){ const p=pid?policies().find(x=>x.id===pid):null, t=tid?M.rec.get(tid):null, prev=p&&!t&&opt.renew?currentTerm(pid):null, d=t?t.d:{};
+  const st={type:p?p.d.type:"health",title:p?p.d.title:"",holder:p?p.d.holder||"Aditya":"Aditya",insured:p?p.d.insured||"":"",insurer:d.insurer||(prev&&prev.d.insurer)||"",policyNo:d.policyNo||"",
+    premium:d.premium||"",cover:d.cover||(prev&&prev.d.cover)||"",start:d.start||(prev&&prev.d.end?addDays(prev.d.end,1):""),end:d.end||"",extra:Object.entries(d.fields||{}).map(([k,v])=>({k,v})),
+    hi:(d.highlights||[]).join("\n"),co:(d.covered||[]).join("\n"),no:(d.notCovered||[]).join("\n"),ex:(d.exclusions||[]).join("\n"),files:[],read:true,remind:p&&p.d.remind?p.d.remind:remindPref()};
+  const term=p&&p.d.link==="term";
+  const coverL={health:"Cover (sum insured)",car:"Cover (IDV, the car's insured value)",bike:"Cover (IDV, the vehicle's insured value)",life:"Cover (sum assured)",home:"Cover (sum insured)",travel:"Cover",other:"Cover amount"};
+  const nameEg={health:"Family health",car:"Creta car",bike:"Activa scooter",life:"Term life",home:"Home",travel:"Europe trip",other:"Policy name"};
+  const keep=()=>{ const g=id=>$(id)?$(id).value:null; [["fN","title"],["fI","insured"],["fCo","insurer"],["fPn","policyNo"],["fSt","start"],["fEn","end"],["fHi","hi"],["fCv2","co"],["fNo","no"],["fEx","ex"],["fHo","holderO"]].forEach(([i,k])=>{ const v=g(i); if(v!=null) st[k]=v; });
+    const pr=g("fPr"), cv=g("fCv"); if(pr!=null) st.premium=numIn(pr)||""; if(cv!=null) st.cover=numIn(cv)||"";
+    st.extra=[...document.querySelectorAll("#fX .rr")].map(r=>({k:r.querySelector("[data-k]").value,v:r.querySelector("[data-v]").value})); const rd=$("fRead"); if(rd) st.read=rd.checked; };
+  const draw=()=>{ const head=!p?"Add a policy":opt.renew?`Next year · ${p.d.title}`:`Edit · ${p.d.title}`;
+    openE(`<div class="t big">${esc(head)}</div>
+    ${!p?`<div class="fld"><span>What is insured?</span><div class="tgrid" id="fT">${PTYPES.map(k=>`<button type="button" data-v="${k}" aria-pressed="${st.type===k}" style="--c:${PCOL[k]}">${svgI(PICON[k],PCOL[k],22)}<span>${esc(LBL0["t_"+k])}</span></button>`).join("")}</div></div>`:""}
+    ${opt.renew?"":`<label class="fld"><span>Give it a name</span><input id="fN" value="${esc(st.title)}" placeholder="${esc(nameEg[st.type])}"></label>
+    <div class="fld"><span>Whose policy</span><div class="seg sm" id="fH">${["Aditya","Spardha","Father","Other"].map(v=>`<button type="button" data-v="${v}" aria-pressed="${st.holder===v||(v==="Other"&&!["Aditya","Spardha","Father"].includes(st.holder))}">${v}</button>`).join("")}</div>${!["Aditya","Spardha","Father"].includes(st.holder)?`<input id="fHo" value="${esc(st.holder==="Other"?"":st.holder)}" placeholder="Name">`:""}</div>
+    <label class="fld"><span>${st.type==="car"||st.type==="bike"?"Vehicle (model and number)":"Who is covered"}</span><input id="fI" value="${esc(st.insured)}" placeholder="${st.type==="car"||st.type==="bike"?"Activa · KA03 AB 1234":"Aditya, Spardha"}"></label>`}
+    ${term?"":`<div class="btns"><label class="fld"><span>Insurance company</span><input id="fCo" value="${esc(st.insurer)}" placeholder="ICICI Lombard"></label><label class="fld"><span>Policy number</span><input id="fPn" value="${esc(st.policyNo)}"></label></div>
+    <div class="btns"><label class="fld"><span>Premium paid (₹)</span><input id="fPr" inputmode="numeric" value="${esc(st.premium)}"></label><label class="fld"><span>${esc(coverL[st.type])}</span><input id="fCv" inputmode="numeric" value="${esc(st.cover)}"></label></div>
+    <div class="btns"><label class="fld"><span>Starts on</span><input id="fSt" type="date" value="${esc(st.start)}"></label><label class="fld"><span>Ends on</span><input id="fEn" type="date" value="${esc(st.end)}"></label></div>
+    <div class="fld"><span>Other details (optional)</span><div id="fX" style="display:grid;gap:8px">${st.extra.map((x,i)=>`<div class="rr"><input data-k value="${esc(x.k)}" placeholder="e.g. Room rent limit"><input data-v value="${esc(x.v)}" placeholder="Value"><button type="button" data-rm="${i}" aria-label="Remove">×</button></div>`).join("")}</div><button type="button" class="addr" id="fXa">+ Add a detail</button></div>
+    <details class="more2"${st.hi||st.co||st.no||st.ex?" open":""}><summary>What's covered and what isn't (optional)</summary>
+      <label class="fld"><span>Key points · one per line</span><textarea id="fHi" rows="2">${esc(st.hi)}</textarea></label>
+      <label class="fld"><span>Covered · one per line</span><textarea id="fCv2" rows="3">${esc(st.co)}</textarea></label>
+      <label class="fld"><span>Not covered · one per line</span><textarea id="fNo" rows="2">${esc(st.no)}</textarea></label>
+      <label class="fld"><span>Exclusions and waiting periods · one per line</span><textarea id="fEx" rows="2">${esc(st.ex)}</textarea></label></details>
+    <div class="fld"><span>Policy document (PDF or photo)</span><button type="button" class="btn2" id="fF">${st.files.length?`${st.files.length} file${st.files.length>1?"s":""} chosen · change`:"Choose file"}</button>
+      ${st.files.length?`<label class="chk"><input type="checkbox" id="fRead" ${st.read?"checked":""}> Let Claude read it and fill in what's covered, exclusions and dates</label>`:""}</div>
+    ${remindSeg("fR",st.remind,"Remind me 15 days before it ends")}`}
+    <div class="err" id="fE"></div><button class="go" type="button" id="fOk">${p&&!opt.renew?"Save changes":"Save policy"}</button>
+    ${p&&!opt.renew?`<div class="btns"><button class="x" type="button" id="fDel">${t?"Delete this year":"Remove policy"}</button>${closeBtn}</div>`:closeBtn}`);
+    const ft=$("fT"); if(ft) ft.querySelectorAll("[data-v]").forEach(b=>b.onclick=()=>{ keep(); st.type=b.dataset.v; draw(); });
+    const fh=$("fH"); if(fh) fh.querySelectorAll("[data-v]").forEach(b=>b.onclick=()=>{ keep(); st.holder=b.dataset.v; draw(); });
+    const fs=$("fSt"); if(fs) fs.onchange=()=>{ if(fs.value&&!$("fEn").value) $("fEn").value=addDays(addMonths(fs.value,12),-1); };
+    const xa=$("fXa"); if(xa) xa.onclick=()=>{ keep(); st.extra.push({k:"",v:""}); draw(); setTimeout(()=>{ const r=[...document.querySelectorAll("#fX [data-k]")].pop(); r&&r.focus(); },50); };
+    document.querySelectorAll("#fX [data-rm]").forEach(b=>b.onclick=()=>{ keep(); st.extra.splice(+b.dataset.rm,1); draw(); });
+    const ff=$("fF"); if(ff) ff.onclick=()=>{ keep(); pickFiles("application/pdf,image/*",F=>{ st.files=F; draw(); }); };
+    bindRemind("fR",v=>st.remind=v);
+    const del=$("fDel"); if(del) del.onclick=()=>confirmSheet(t?"Delete this policy year?":"Remove this policy?",t?"Its documents stay in Google Drive.":"It disappears from the list. Its records and documents stay in the sheet and Drive.",t?"Delete year":"Remove",()=>{
+      if(t) OUT.push({kind:"rec",ops:[{id:t.id,del:true}],rid:rid()}); else { OUT.push({kind:"rec",ops:[{id:pid,kind:"pol",title:p.d.title,data:Object.assign({},p.d,{archived:M.today})}],rid:rid()}); queueCal(polCal(pid,p.d.title,polEnd(p),false)); }
+      saveOut(); flush(); ov.back(); if(!t) setTimeout(()=>{ if(SC&&SC.h==="pol") ov.back(); },260); refresh(); });
+    $("fOk").onclick=async()=>{ keep(); const holder=st.holder==="Other"||!["Aditya","Spardha","Father"].includes(st.holder)?(st.holderO||"").trim()||"Other":st.holder;
+      if(!opt.renew&&!st.title.trim()){ $("fE").textContent="Give the policy a name."; return; }
+      if(st.start&&st.end&&st.end<st.start){ $("fE").textContent="The end date is before the start date."; return; }
+      const id=pid||"pol-"+rid(), title=(opt.renew?p.d.title:st.title.trim()), lines=s=>String(s||"").split("\n").map(x=>x.trim()).filter(Boolean), fields={};
+      st.extra.forEach(x=>{ if(x.k.trim()&&x.v.trim()) fields[x.k.trim()]=x.v.trim(); });
+      const pd=Object.assign({},p?p.d:{created:M.today},{title,type:st.type,insured:(st.insured||"").trim(),holder,remind:st.remind}); delete pd.link; if(term) pd.link="term";
+      const ops=[{id,kind:"pol",title,data:pd}]; let tidN=null;
+      if(!term){ tidN=t?t.id:"pt-"+rid(); ops.push({id:tidN,kind:"pterm",title,data:Object.assign({},d,{pol:id,created:d.created||M.today,insurer:st.insurer.trim(),policyNo:st.policyNo.trim(),start:st.start,end:st.end,premium:st.premium,cover:st.cover,fields,
+        highlights:lines(st.hi),covered:lines(st.co),notCovered:lines(st.no),exclusions:lines(st.ex),docs:d.docs||[]})}); }
+      OUT.push({kind:"rec",ops,rid:rid()}); if(!term) queueCal(polCal(id,title,st.end,st.remind==="cal")); saveOut(); build();
+      if(st.files.length&&tidN){ try{ const up=await uploadFiles(st.files,`Insurance/${title}/${st.start?st.start.slice(0,4):M.today}`,(f,i,mime)=>f.name||`${title}-${i+1}.${extOf(f,mime)}`);
+          const cur=M.rec.get(tidN); OUT.push({kind:"rec",ops:[{id:tidN,kind:"pterm",title,data:Object.assign({},cur.d,{docs:(cur.d.docs||[]).concat(up),status:st.read?"reading":""})}],rid:rid()}); saveOut(); build();
+          if(st.read){ await sendInbox("policy",{pol:id,term:tidN,title,type:st.type,insured:pd.insured,holder,extraFields:EXTRA0[st.type]||[],coverLabel:coverL[st.type]},null,title+" policy",up); flush(); refresh(); return; } }
+        catch(x){ showToast("Saved, but the file didn't upload: "+(x.message||x),6000); } }
+      flush(); ov.back(); refresh(); showToast("Policy saved"); if(!p) setTimeout(()=>{ setTab("ins"); openPolicy(id); },300); }; };
   draw(); }
+function confirmSheet(title,msg,yes,fn){ openE(`<div class="t big">${esc(title)}</div><div class="s" style="text-align:left">${esc(msg)}</div><button class="go danger" type="button" id="cfY">${esc(yes)}</button><button class="x" type="button" id="cfN">Cancel</button>`);
+  $("cfY").onclick=fn; $("cfN").onclick=()=>ov.back(); }
 function ensurePol(pid){ const p=policies().find(x=>x.id===pid); if(p&&p.synthetic){ OUT.push({kind:"rec",ops:[{id:pid,kind:"pol",title:p.d.title,data:Object.assign({},p.d,{created:M.today})}],rid:rid()}); saveOut(); } return p; }
-function policyUpload(pid,mode){ const p=ensurePol(pid); if(!p) return;
+function policyUpload(pid,mode){ if(mode==="renew"&&pid!=="pol-term"){ const p0=policies().find(x=>x.id===pid); if(p0) return policyForm(pid,null,currentTerm(pid)?{renew:true}:{}); } const p=ensurePol(pid); if(!p) return;
   pickFiles("application/pdf,image/*",async files=>{
     try{ const cur=currentTerm(pid), folder=`Insurance/${p.d.title}/${mode==="doc"&&cur?yearOf(cur):M.today}`;
       const up=await uploadFiles(files,folder,(f,i,mime)=>f.name||`${p.d.title}-${M.today}-${i+1}.${extOf(f,mime)}`);
@@ -796,50 +862,9 @@ function reviewPolicy(r){ const d=r.d, x=d.res||{}, c=d.ctx||{}, p=policies().fi
   $("rpOk").onclick=()=>{ const nd=Object.assign({},t.d,{status:"",read:M.today,src:"Claude",insurer:x.insurer||t.d.insurer||"",policyNo:x.policyNo||t.d.policyNo||"",start:x.start||t.d.start||"",end:x.end||t.d.end||"",premium:+x.premium||t.d.premium||"",cover:+x.cover||t.d.cover||"",
       fields:Object.assign({},t.d.fields||{},F),covered:li(x.covered),notCovered:li(x.notCovered),exclusions:li(x.exclusions),highlights:li(x.highlights)});
     const ops=[{id:t.id,kind:"pterm",title:p.d.title,data:nd}]; if(x.insured&&!p.d.insured) ops.push({id:p.id,kind:"pol",title:p.d.title,data:Object.assign({},p.d,{insured:x.insured})});
-    OUT.push({kind:"rec",ops,rid:rid()}); inboxDone(r.id); saveOut(); ov.back(); refresh(); autoReminders(); flush(); showToast("Policy details saved"); setTimeout(()=>openPolicy(p.id),100); }; }
-function editPolicy(pid,tid){ const p=policies().find(x=>x.id===pid); if(!p) return; const t=tid?M.rec.get(tid):null, d=t?t.d:{}, X=extraFor(p.d.type), F=d.fields||{};
-  const extras=X.concat(Object.keys(F).filter(k=>!X.includes(k)));
-  openE(`<div class="t big">Edit ${esc(p.d.title)}</div>
-    <label class="fld"><span>Name</span><input id="ePn" value="${esc(p.d.title)}"></label>
-    <div class="btns"><label class="fld"><span>${esc(L("f_insured"))}</span><input id="ePi" value="${esc(p.d.insured||"")}"></label><label class="fld"><span>${esc(L("f_holder"))}</span><input id="ePh" value="${esc(p.d.holder||"")}"></label></div>
-    ${p.d.link==="term"?"":`<div class="gh"><span>${t?esc(yearOf(t)):"This year's policy"}</span></div>
-    <div class="btns"><label class="fld"><span>${esc(L("f_insurer"))}</span><input id="eIn" value="${esc(d.insurer||"")}"></label><label class="fld"><span>${esc(L("f_policyNo"))}</span><input id="ePo" value="${esc(d.policyNo||"")}"></label></div>
-    <div class="btns"><label class="fld"><span>${esc(L("f_start"))}</span><input id="eSt" type="date" value="${esc(d.start||"")}"></label><label class="fld"><span>${esc(L("f_end"))}</span><input id="eEn" type="date" value="${esc(d.end||"")}"></label></div>
-    <div class="btns"><label class="fld"><span>${esc(L("f_premium"))} (₹)</span><input id="ePr" inputmode="numeric" value="${esc(d.premium||"")}"></label><label class="fld"><span>${esc(L("cover_"+p.d.type))} (₹)</span><input id="eCv" inputmode="numeric" value="${esc(d.cover||"")}"></label></div>
-    ${extras.map((f,i)=>`<label class="fld"><span>${esc(f)}</span><input data-xf="${esc(f)}" value="${esc(F[f]||"")}"></label>`).join("")}
-    <label class="fld"><span>${esc(L("sec_high"))} · one per line</span><textarea id="eHi" rows="3">${esc((d.highlights||[]).join("\n"))}</textarea></label>
-    <label class="fld"><span>${esc(L("sec_covered"))} · one per line</span><textarea id="eCo" rows="4">${esc((d.covered||[]).join("\n"))}</textarea></label>
-    <label class="fld"><span>${esc(L("sec_not"))} · one per line</span><textarea id="eNo" rows="3">${esc((d.notCovered||[]).join("\n"))}</textarea></label>
-    <label class="fld"><span>${esc(L("sec_excl"))} · one per line</span><textarea id="eEx" rows="3">${esc((d.exclusions||[]).join("\n"))}</textarea></label>`}
-    <div class="err" id="eErr"></div><button class="go" type="button" id="eOk">Save</button>
-    <div class="btns"><button class="x" type="button" id="eDel">${t?"Delete this year":"Archive policy"}</button>${closeBtn}</div>`);
-  $("eOk").onclick=()=>{ const title=$("ePn").value.trim(); if(!title){ $("eErr").textContent="Give it a name."; return; }
-    const ops=[{id:pid,kind:"pol",title,data:Object.assign({},p.d,{title,insured:$("ePi").value.trim(),holder:$("ePh").value.trim()})}];
-    if(p.d.link!=="term"){ const lines=id=>$(id).value.split("\n").map(s=>s.trim()).filter(Boolean), fields={};
-      $("eBox").querySelectorAll("[data-xf]").forEach(i=>{ if(i.value.trim()) fields[i.dataset.xf]=i.value.trim(); });
-      const st=$("eSt").value, en=$("eEn").value; if(st&&en&&en<st){ $("eErr").textContent="The end date is before the start."; return; }
-      const id=t?t.id:"pt-"+rid(); ops.push({id,kind:"pterm",title,data:Object.assign({},d,{pol:pid,created:d.created||M.today,insurer:$("eIn").value.trim(),policyNo:$("ePo").value.trim(),start:st,end:en,premium:numIn($("ePr").value)||"",cover:numIn($("eCv").value)||"",
-        fields,highlights:lines("eHi"),covered:lines("eCo"),notCovered:lines("eNo"),exclusions:lines("eEx")})}); }
-    OUT.push({kind:"rec",ops,rid:rid()}); saveOut(); ov.back(); refresh(); autoReminders(); flush(); showToast("Saved"); };
-  $("eDel").onclick=()=>{ if(t){ if(!confirm("Delete this policy year? Its documents stay in Drive.")) return; OUT.push({kind:"rec",ops:[{id:t.id,del:true}],rid:rid()}); }
-    else { if(!confirm("Archive this policy? It disappears from the list; its records stay in the sheet.")) return; OUT.push({kind:"rec",ops:[{id:pid,kind:"pol",title:p.d.title,data:Object.assign({},p.d,{archived:M.today})}],rid:rid()}); }
-    saveOut(); ov.back(); if(!t) setTimeout(()=>ov.back(),60); refresh(); flush(); }; }
-function openLabels(){ const cur=labels(), T=cur.t||{}, E=cur.extra||{};
-  const grp=(title,keys)=>`<div class="gh"><span>${title}</span></div><div class="list" style="max-height:none;padding:0">${keys.map(k=>`<label class="vrow"><span><small>${esc(LBL0[k])}</small></span><input data-lk="${k}" value="${esc(T[k]||"")}" placeholder="${esc(LBL0[k])}"></label>`).join("")}</div>`;
-  openE(`<div class="t big">Rename labels</div><div class="s" style="text-align:left">Type your own name for any heading or field. Leave a box empty to keep the default.</div>
-    ${grp("Sections",["ins_title","sec_current","sec_high","sec_covered","sec_not","sec_excl","sec_extra","sec_docs","sec_hist","sec_prem"])}
-    ${grp("Fields",["f_insurer","f_policyNo","f_start","f_end","f_premium","f_insured","f_holder"].concat(PTYPES.map(t=>"cover_"+t)))}
-    ${grp("Policy types",PTYPES.map(t=>"t_"+t))}
-    <div class="gh"><span>Extra fields per type · one per line</span></div>
-    ${PTYPES.map(t=>`<label class="fld"><span>${esc(L("t_"+t))}</span><textarea rows="3" data-ex="${t}">${esc((Array.isArray(E[t])?E[t]:EXTRA0[t]).join("\n"))}</textarea></label>`).join("")}
-    <button class="go" type="button" id="lOk">Save labels</button><div class="btns"><button class="x" type="button" id="lReset">Reset all</button>${closeBtn}</div>`);
-  const save=data=>{ OUT.push({kind:"rec",ops:[{id:"labels",kind:"labels",title:"Insurance labels",data}],rid:rid()}); saveOut(); ov.back(); refresh(); flush(); showToast("Labels saved"); };
-  $("lOk").onclick=()=>{ const t={}, extra={}; $("eBox").querySelectorAll("[data-lk]").forEach(i=>{ if(i.value.trim()) t[i.dataset.lk]=i.value.trim(); });
-    $("eBox").querySelectorAll("[data-ex]").forEach(i=>extra[i.dataset.ex]=i.value.split("\n").map(s=>s.trim()).filter(Boolean)); save({t,extra}); };
-  $("lReset").onclick=()=>save({t:{},extra:{}}); }
-
+    OUT.push({kind:"rec",ops,rid:rid()}); queueCal(polCal(p.id,p.d.title,nd.end,(p.d.remind||remindPref())==="cal")); inboxDone(r.id); saveOut(); ov.back(); refresh(); flush(); showToast("Policy details saved"); setTimeout(()=>openPolicy(p.id),100); }; }
 /* ---------- search ---------- */
-function openSearch(){ $("q").value=""; doSearch(); ov.open($("sheet"),()=>{ $("sheet").hidden=true; }); setTimeout(()=>$("q").focus(),60); }
+function openSearch(){ $("q").value=""; doSearch(); ov.open($("sheet"),()=>{ vanish($("sheet")); }); setTimeout(()=>$("q").focus(),60); }
 function doSearch(){ const q=$("q").value.trim().toLowerCase();
   const H=M.hold.filter(h=>!q||[h.name,h.isin,h.who,h.plat].join(" ").toLowerCase().includes(q)).sort((a,b)=>b.cur-a.cur);
   const Bd=M.bonds.filter(b=>!q||[b.name,b.platL,b.who].join(" ").toLowerCase().includes(q));
@@ -869,7 +894,7 @@ function typesNow(){ let L2=TYPES[A.who].filter(t=>M.tabs.some(c=>c.name===tabFo
 function openAdd(mode,pre){ A.mode=mode==="out"?"out":"in"; A.digits=""; A.date=TODAY(); A.pre=pre||{}; A.det={name:A.pre.name||undefined}; A.type=null; A.acct=A.pre.cat===PIKUL?"sp":"own";
   A.who=A.pre.cat===TERM?"Aditya":A.pre.inv||(WHO!=="all"?WHO:"Aditya"); if(!typesNow().length) A.who="Aditya";
   $("aErr").textContent=""; setStep("pad"); showAmt(); showDate(); paintMode(); paintWho();
-  if(!isOpen($("addSheet"))) ov.open($("addSheet"),()=>{ $("addSheet").hidden=true; }); }
+  if(!isOpen($("addSheet"))) ov.open($("addSheet"),()=>{ vanish($("addSheet")); }); }
 function paintMode(){ $("aMode").querySelectorAll("button").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.m===A.mode))); $("aMode").hidden=A.pre.cat===TERM;
   const c=A.pre.a?CLS[A.pre.a].label.toLowerCase():""; $("addTitle").textContent=A.pre.name?(A.mode==="out"?"Sell · ":"Buy · ")+A.pre.name:A.pre.cat===TERM?"Term premium":A.mode==="out"?(c?"Take out of "+c:"Withdraw or sell"):(c?"Add to "+c:"New investment"); }
 function paintWho(){ $("aWho").textContent=A.who; $("aWhoBtn").disabled=!!A.pre.inv||A.pre.cat===TERM; }
@@ -898,7 +923,7 @@ function drawDet(){
   if(d.plat==null) d.plat=used[0]||(nps?"Protean eNPS":tabInfo(cat).plat||"Groww"); if(d.plat&&!plats.includes(d.plat)) plats.unshift(d.plat);
   const held=stock||mf?M.hold.filter(h=>h.tab===cat&&h.a===(stock?"Stocks":"Mutual Funds")).map(h=>h.name):[];
   const names=[...new Set(held.concat(recentOf("name",same)))], nameL=isBond?"Bond name":mf?"Fund":"Stock";
-  if(!d.reps) d.reps=[{d:"",a:""}];
+  if(!d.reps) d.reps=[{d:"",a:""}]; if(d.remind==null) d.remind=remindPref();
   const keep=()=>{ const g=id=>$(id)?$(id).value:undefined; ["name","bid","note","qty","units"].forEach(k=>{ const v=g("d"+k[0].toUpperCase()+k.slice(1)); if(v!==undefined) d[k]=v; }); const o=g("dPlatO"); if(o!==undefined) d.plat=o.trim();
     const rr=[...document.querySelectorAll("#dReps .rr")]; if(rr.length) d.reps=rr.map(r=>({d:r.querySelector("input[type=date]").value,a:r.querySelector("input[inputmode]").value})); };
   const q=numIn(d.qty), px=q?amtNum()/q:0;
@@ -910,6 +935,7 @@ function drawDet(){
     ${stock?`<label class="fld"><span>Quantity (shares)</span><input id="dQty" inputmode="decimal" value="${esc(d.qty||"")}" autocomplete="off"></label><div class="calc" id="dPx">${q?`<div><span>Price per share</span><b>${esc(rs(px,false))}</b></div>`:"<div><span>Amount is the total, including charges. Quantity gives the price.</span></div>"}</div>`:""}
     ${mf?`<label class="fld"><span>Units (optional, from the order confirmation)</span><input id="dUnits" inputmode="decimal" value="${esc(d.units||"")}" autocomplete="off"></label>`:""}
     ${isBond&&inv?`<div class="fld"><span>Repayment dates · amount back each time (before TDS)</span><div id="dReps" style="display:grid;gap:8px">${d.reps.map((r,i)=>`<div class="rr"><input type="date" value="${esc(r.d)}" aria-label="Repayment date ${i+1}"><input inputmode="numeric" placeholder="₹ amount" value="${esc(r.a)}" aria-label="Amount ${i+1}"><button type="button" data-rm="${i}" aria-label="Remove">×</button></div>`).join("")}</div>${d.reps.length<60?`<button type="button" class="addr" id="dAddR">+ Add another date</button>`:""}</div>
+      ${remindSeg("dRem",d.remind,"Remind me on the repayment dates")}
       ${F.has("bid")?`<label class="fld"><span>Bond ID (optional)</span><input id="dBid" value="${esc(d.bid||"")}" maxlength="40"></label>`:""}`:""}
     ${F.has("note")?`<label class="fld"><span>${inv?"Note (optional)":"Reason (optional)"}</span><textarea id="dNote" rows="2" maxlength="250">${esc(d.note||"")}</textarea></label>`:""}
     <div class="err" id="dErr" role="alert"></div><button type="button" class="btn1" id="dSave">${inv?(term?"Save premium":isBond?"Save bond":stock?"Save buy":"Save"):stock?"Save sale":"Save withdrawal"}</button>`;
@@ -920,6 +946,7 @@ function drawDet(){
   document.querySelectorAll("#dReps [data-rm]").forEach(b=>b.onclick=()=>{ keep(); d.reps.splice(+b.dataset.rm,1); if(!d.reps.length) d.reps=[{d:"",a:""}]; drawDet(); });
   const sh=$("dShot"); if(sh) sh.onclick=()=>{ keep(); pickFiles("image/*,application/pdf",files=>{ const amt=amtNum(), ctx={cat,who:A.who,platform:d.plat||"",amount:amt,date:A.date,name:(d.name||"").trim()};
     ov.back(); setTimeout(()=>sendInbox("bond",ctx,files,`New bond · ${rs(amt,false)}${ctx.name?" · "+ctx.name:""}`),120); }); };
+  bindRemind("dRem",v=>d.remind=v);
   $("dSave").onclick=()=>{ keep(); saveEntry(cat,F); };
 }
 function saveEntry(cat,F){ const d=A.det, type=A.type, isBond=type==="Bond", term=type==="Term", stock=type==="Stocks"||type==="US Stocks", mf=type==="MF"||type==="ELSS"; let mat="",exp="",note=(d.note||"").trim(), R=[];
@@ -933,7 +960,7 @@ function saveEntry(cat,F){ const d=A.det, type=A.type, isBond=type==="Bond", ter
   if(mf&&!(d.name||"").trim()){ $("dErr").textContent="Type the fund's name."; return; }
   if(d.platOther&&!d.plat){ $("dErr").textContent="Type the platform name, or pick one."; return; }
   const p={cat,kind:A.mode,date:A.date,amount:amtNum(),type:F.has("type")&&!term?(type==="Bond"?"Bond":type):"",plat:term?"":d.plat||"",name:term?"":(d.name||"").trim(),note,bid:isBond?(d.bid||"").trim():"",mat,exp,rid:rid()};
-  OUT.push({kind:"add",p}); saveOut(); ov.back(); refresh(); if(isBond) autoReminders(); showToast(`${rs(p.amount,false)} saved`); flush(); }
+  if(isBond&&A.mode==="in"&&d.remind==="cal"&&R.length){ queueCal(bondCal(cat+"|"+p.name,p.name,p.plat,R)); OUT.push({kind:"rec",ops:[{id:"bond:"+cat+"|"+p.name,kind:"bond",title:p.name,data:{remind:"cal"}}],rid:rid()}); } OUT.push({kind:"add",p}); saveOut(); ov.back(); refresh(); showToast(`${rs(p.amount,false)} saved`); flush(); }
 
 /* ---------- sync ---------- */
 let loading=false, flushing=false;
@@ -957,7 +984,7 @@ function flush(){ if(flushing||!PW()||!API()||!OUT.length) return;
 addEventListener("online",()=>{ flush(); pull(); });
 function pull(){ if(loading) return Promise.resolve(); if(!API()){ askPass(null,true); return Promise.resolve(); } if(!PW()){ askPass(); return Promise.resolve(); } flush(); loading=true;
   setSync("busy",DATA?`Synced ${fmtWhen(CACHE_AT)} · updating…`:"Loading your sheet…");
-  return call("get").then(d=>{ loading=false; applyData(d); autoReminders(); flush(); },e=>{ loading=false; const m=errText(e);
+  return call("get").then(d=>{ loading=false; applyData(d); flush(); },e=>{ loading=false; const m=errText(e);
     setSync("warn",e&&e.net&&DATA?`Offline · copy from ${fmtWhen(CACHE_AT)}`:m); }); }
 function askPass(msg,needLink){ const need=needLink||!API(); $("gLink").hidden=!need; $("gMsg").textContent=need?"Open the private setup link once, or paste it here with the family passcode.":"Enter the family passcode (once on this phone).";
   $("gErr").textContent=msg||""; $("gate").hidden=false; setTimeout(()=>(need?$("gLink"):$("gIn")).focus(),50); }
@@ -980,26 +1007,33 @@ $("upBtn").onclick=()=>{ const sm=document.documentElement.classList.contains("c
   addEventListener("touchend",()=>{ if(!pulling) return; pulling=false; if(dist>130){ ptr.classList.add("go"); ptr.style.height="44px"; $("ptrTxt").textContent="Syncing with your sheet…"; Promise.resolve(pull()).finally(()=>setTimeout(()=>{ ptr.classList.remove("go"); ptr.style.height="0"; },400)); } else ptr.style.height="0"; dist=0; }); })();
 const ACC=[["","Cyan","#3CF0D4"],["violet","Violet","#A98BFF"],["amber","Amber","#FFB547"],["rose","Rose","#FF6FA8"],["ice","Ice","#7CC8FF"]];
 function segs(id,opts,cur,on){ const el=$(id); el.innerHTML=opts.map(([k,l])=>`<button type="button" data-k="${k}" aria-pressed="${k===cur}">${l}</button>`).join(""); el.querySelectorAll("button").forEach(b=>b.onclick=()=>{ on(b.dataset.k); buildDrawer(); }); }
+function setCalm(on){ store.set("calm",on); document.documentElement.classList.toggle("calm",on); if(S3.setCalm) S3.setCalm(on); refresh(); }
 function buildDrawer(){
-  segs("fWho",[["all","Everyone"],["Aditya","Aditya"],["Spardha","Spardha"]],WHO,v=>setWho(v));
-  segs("fAmt",[["short","₹12.3L"],["full","₹12,34,567"]],SHORT?"short":"full",v=>{ SHORT=v==="short"; store.set("amt",v); refresh(); });
-  segs("fMotion",[["full","Full 3D"],["calm","Calm"]],store.get("calm",false)?"calm":"full",v=>{ store.set("calm",v==="calm"); document.documentElement.classList.toggle("calm",v==="calm"); });
+  const nps=M?agg("Others","all"):null, wait=M?recs("inbox").filter(r=>r.d.status==="new").length:0, ready=M?recs("inbox").filter(r=>r.d.status==="ready").length:0;
+  $("dNpsS").textContent=nps&&nps.U.length?money(nps.cur,true).replace(/<[^>]+>/g,"")+" · not in totals":"Not set up";
+  $("dInboxS").textContent=ready?`${ready} ready to check`:wait?`${wait} waiting`:"Nothing waiting";
+  $("dInsS").textContent=M?`${policies().length} polic${policies().length===1?"y":"ies"}`:"";
+  segs("fAmt",[["short","Short ₹12.3L"],["full","Full ₹12,34,567"]],SHORT?"short":"full",v=>{ SHORT=v==="short"; store.set("amt",v); refresh(); });
+  segs("fMotion",[["full","3D and motion"],["calm","Simple and still"]],store.get("calm",false)?"calm":"full",v=>setCalm(v==="calm"));
   const cur=store.get("acc",""); $("fAcc").innerHTML=ACC.map(([k,n,c])=>`<button type="button" aria-pressed="${cur===k}" data-k="${k}"><span class="sw" style="--a:${c}"></span>${n}</button>`).join("");
   $("fAcc").querySelectorAll("button").forEach(b=>b.onclick=()=>{ store.set("acc",b.dataset.k); if(b.dataset.k) document.documentElement.setAttribute("data-acc",b.dataset.k); else document.documentElement.removeAttribute("data-acc"); S3.ringColor(ACC.find(a=>a[0]===b.dataset.k)[2]); buildDrawer(); });
   $("sheetLink").href=M&&M.url||"#"; $("filesLink").href=M&&M.files||"#"; $("filesLink").hidden=!(M&&M.files);
 }
-const openDrawer=()=>{ buildDrawer(); $("scrim").hidden=false; ov.open($("drawer"),()=>{ $("drawer").hidden=true; $("scrim").hidden=true; }); };
+const openDrawer=()=>{ buildDrawer(); $("scrim").hidden=false; ov.open($("drawer"),()=>{ vanish($("drawer")); vanish($("scrim")); }); };
+const fromDrawer=fn=>()=>{ ov.back(); setTimeout(fn,240); };
 $("menuBtn").onclick=openDrawer; $("drawerDone").onclick=()=>ov.back(); $("scrim").onclick=()=>ov.back();
-$("dVals").onclick=()=>{ ov.back(); setTimeout(()=>openValues(),60); };
-$("dCal").onclick=()=>{ ov.back(); setTimeout(syncAllReminders,60); };
-$("dLabels").onclick=()=>{ ov.back(); setTimeout(openLabels,60); };
-$("dInbox").onclick=()=>{ ov.back(); setTimeout(()=>{ const L2=recs("inbox").filter(r=>r.d.status==="new"||r.d.status==="ready");
-  openE(`<div class="t big">Claude inbox</div><div class="s" style="text-align:left">Screenshots and policies you upload wait here until Claude reads them in your Artha project.</div>${L2.length?`<div class="list">${L2.map(inboxRow).join("")}</div><button class="go" type="button" id="iAll">Process now</button>`:`<div class="empty">Nothing waiting.</div>`}${closeBtn}`);
-  const b=$("iAll"); if(b) b.onclick=processNow; },60); };
-$("forgetBtn").onclick=()=>{ if(OUT.length){ showToast("Some changes are still waiting to sync. Go online first.",4000); return; } ["api","pass","cache","cacheAt","outbox"].forEach(k=>{ try{localStorage.removeItem("artha:"+k);}catch(e){} }); location.reload(); };
+$("dVals").onclick=fromDrawer(()=>openValues());
+$("dNps").onclick=fromDrawer(()=>{ if(agg("Others","all").U.length) openScr("NPS"); else showToast("No NPS entries yet. Add one with the + button."); });
+$("dIns").onclick=fromDrawer(()=>setTab("ins"));
+$("dInbox").onclick=fromDrawer(()=>{ const L2=recs("inbox").filter(r=>r.d.status==="new"||r.d.status==="ready");
+  openE(`<div class="t big">Claude inbox</div><div class="s" style="text-align:left">Bond screenshots and policies you upload wait here until Claude reads them. Tap Process now, paste the copied message in the chat that opens, and send it.</div>${L2.length?`<div class="list">${L2.map(inboxRow).join("")}</div><button class="go" type="button" id="iAll">Process now</button>`:`<div class="empty">Nothing waiting.</div>`}${closeBtn}`);
+  const b=$("iAll"); if(b) b.onclick=processNow; });
+$("forgetBtn").onclick=fromDrawer(()=>{ if(OUT.length){ showToast("Some changes are still waiting to sync. Go online first, then try again.",4500); return; }
+  confirmSheet("Forget this phone?","Artha will sign out here. You'll need the private setup link and the passcode to open it again. Nothing in your sheet is deleted.","Forget this phone",()=>{
+    ["api","pass","cache","cacheAt","outbox"].forEach(k=>{ try{localStorage.removeItem("artha:"+k);}catch(e){} }); location.reload(); }); });
 function eye(){ $("eyeP").setAttribute("d",HIDE?"M3 3l18 18M10.6 6.1A9.8 9.8 0 0 1 12 6c6.4 0 10 6 10 6a17 17 0 0 1-3.2 3.9M6.6 6.6C3.9 8.3 2 12 2 12s3.6 6 10 6c1.6 0 3-.3 4.3-.9":"M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"); $("eyeBtn").setAttribute("aria-label",HIDE?"Show amounts":"Hide amounts"); }
 $("eyeBtn").onclick=()=>{ HIDE=!HIDE; store.set("hide",HIDE); eye(); refresh(); }; eye();
-function refresh(){ build(); if(TAB_NOW==="ins") renderIns(); else renderHome(); paintBell(); if(SC&&isOpen($("scr"))) renderScr(); if(isOpen($("sheet"))) doSearch(); }
+function refresh(){ build(); if(TAB_NOW==="ins") renderIns(); else renderHome(); paintBell(); if(isOpen($("drawer"))) buildDrawer(); if(SC&&isOpen($("scr"))) renderScr(); if(isOpen($("sheet"))) doSearch(); }
 $("verTxt").textContent="Version "+APP_VERSION;
 async function checkUpdate(manual){ try{ const j=await (await fetch("version.json?t="+Date.now(),{cache:"no-store"})).json();
     if(j.v&&j.v!==APP_VERSION){ $("updTxt").textContent=j.note?`New: ${j.note}`:"A new version is ready"; $("upd").hidden=false; } else if(manual) showToast("You're on the latest version"); }

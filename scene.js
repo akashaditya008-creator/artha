@@ -6,6 +6,9 @@ const T=window.THREE;
 const webgl=(()=>{ try{ const c=document.createElement("canvas"); return !!(T&&(c.getContext("webgl")||c.getContext("experimental-webgl"))); }catch(e){ return false; } })();
 const RM=matchMedia("(prefers-reduced-motion: reduce)");
 const S={ok:webgl, calm:()=>RM.matches||document.documentElement.classList.contains("calm")};
+let FOCUS=null;
+S.ringFocus=c=>{ FOCUS=c||null; };
+S.setCalm=()=>{};
 const THEME={home:0x3CF0D4,Stocks:0x5B8CFF,"Mutual Funds":0x2EE6B0,Bonds:0xFFB547,NPS:0xFF8A3D,ins:0xB18CFF,pol:0xB18CFF};
 let tgtCol=new (T?T.Color:Object)(THEME.home);
 const pointer={x:0,y:0,tx:0,ty:0}; let scrollK=0, tilt=null;
@@ -39,7 +42,7 @@ S.initBg=function(canvas){
   const size=()=>{ r.setSize(innerWidth,innerHeight,false); cam.aspect=innerWidth/innerHeight; cam.updateProjectionMatrix(); };
   size(); addEventListener("resize",size);
   let last=performance.now();
-  const loop=now=>{ requestAnimationFrame(loop); if(document.hidden) return;
+  const loop=now=>{ requestAnimationFrame(loop); if(document.hidden||document.documentElement.classList.contains("calm")) return;
     const dt=Math.min(.05,(now-last)/1000); last=now; const calm=S.calm(), sp=calm?0:1;
     BG.col.lerp(tgtCol,.04); grid.material.color.copy(BG.col); dust.material.color.copy(BG.col); solids.forEach(m=>m.material.color.copy(BG.col));
     grid.position.z=(grid.position.z+dt*.9*sp)%2; grid2.position.z=grid.position.z;
@@ -94,8 +97,9 @@ S.ring=function(host,segs,onTap){
       const age=(now-RG.t0)/1000;
       RG.meshes.forEach((m,i)=>{ const k=calm?1:Math.min(1,Math.max(0,(age-i*.12)/.7)), e=1-Math.pow(1-k,3);
         m.scale.set(.6+.4*e,.6+.4*e,Math.max(.001,e)); const pop=m.userData.popT?Math.max(0,1-(now-m.userData.popT)/600):0;
-        const out=.12*Math.sin(Math.PI*Math.min(1,pop*1.0))+(m===RG.hover?.08:0); m.position.set(Math.cos(m.userData.mid)*out,Math.sin(m.userData.mid)*out,0);
-        m.material.emissiveIntensity=.28+.25*Math.sin(now/900+i)*(calm?0:1)*.5+pop*.5; });
+        const foc=FOCUS&&m.userData.c===FOCUS, dim=FOCUS&&!foc; m.userData.o=(m.userData.o==null?1:m.userData.o); m.userData.o+=((dim?.18:.96)-m.userData.o)*.15; m.userData.f=(m.userData.f||0)+((foc?.16:0)-(m.userData.f||0))*.15;
+        const out=.12*Math.sin(Math.PI*Math.min(1,pop*1.0))+m.userData.f; m.position.set(Math.cos(m.userData.mid)*out,Math.sin(m.userData.mid)*out,m.userData.f*.6);
+        m.material.opacity=m.userData.o; m.material.emissiveIntensity=.28+.25*Math.sin(now/900+i)*(calm?0:1)*.5+pop*.5+(foc?.25:0); });
       RG.r.render(RG.scene,RG.cam); };
     requestAnimationFrame(loop);
   }

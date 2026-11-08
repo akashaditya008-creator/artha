@@ -375,3 +375,79 @@ main{padding:0 max(16px,env(safe-area-inset-left,0px));perspective:1200px}
 .mask .money{letter-spacing:.1em}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.001s!important;transition-duration:.001s!important}}
 :root.calm *{animation-duration:.001s!important}
+
+/* ===== 2.1: simpler home, smoother moves ===== */
+.hero{position:relative;text-align:center;padding:14px 0 2px;touch-action:pan-y;user-select:none;-webkit-user-select:none}
+.faces{position:relative;height:96px;cursor:pointer;overflow:hidden}
+.fc{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;transition:transform .38s var(--ease),opacity .3s}
+.fc.l{transform:translateX(-36%);opacity:0;pointer-events:none}.fc.r{transform:translateX(36%);opacity:0;pointer-events:none}.fc.on{transform:none;opacity:1}
+.fc small{font:600 10.5px var(--mono);letter-spacing:.2em;text-transform:uppercase;color:var(--neon)}
+.fc b{font:600 36px var(--mono);letter-spacing:-.04em;margin-top:6px;line-height:1.05}
+.fc b.s{font-size:30px}
+.fc i{font:500 12.5px var(--body);font-style:normal;color:var(--muted);margin-top:6px}
+.flash{animation:flash .6s var(--ease)}
+@keyframes flash{0%{opacity:.35;transform:translateY(4px)}100%{opacity:1;transform:none}}
+.meas{display:inline-grid;grid-template-columns:repeat(3,auto);gap:4px;padding:3px;border-radius:12px;background:var(--chip);margin-top:8px}
+.meas button{padding:6px 12px;border-radius:9px;font:600 12px var(--body);color:var(--muted);transition:background .25s,color .25s}
+.meas button[aria-pressed="true"]{background:var(--raise);color:var(--neon);box-shadow:inset 0 0 0 1px var(--line)}
+.stage{padding-top:0!important;margin-top:0}
+.stage.flatmode canvas.ring3d{display:none}
+.stage svg.flat{max-width:300px;margin:6px auto}
+.scope{display:grid;gap:8px;margin:2px 0 6px}
+.scope button{height:14px;position:relative}
+.scope button::after{content:"";position:absolute;left:18%;right:18%;top:6px;height:3px;border-radius:2px;background:var(--line);transition:background .3s,box-shadow .3s,left .3s,right .3s}
+.scope button[aria-pressed="true"]::after{background:var(--c);box-shadow:0 0 10px var(--c);left:6%;right:6%}
+.legend{display:grid;gap:8px;margin:0 0 10px}
+.lg{padding:10px 9px 9px;border-radius:15px;transition:transform .2s var(--spring),border-color .3s,background .3s}
+.lg b{font-size:14.5px}.lg i{font-size:11px;min-height:13px}
+.lg[aria-pressed="true"]{border-color:var(--c);background:color-mix(in srgb,var(--c) 12%,var(--surface))}
+.btn2.wide{width:100%;margin:2px 0 10px}
+#homeOpen .hint{margin:4px 0 10px}
+/* drawer */
+.dhead small{display:block;font:500 11px var(--mono);color:var(--dim);margin-top:4px}
+.dgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.dt{display:grid;gap:4px;align-content:start;text-align:left;padding:14px;border-radius:18px;background:var(--surface);border:1px solid var(--line);transition:transform .2s var(--spring),border-color .2s}
+.dt:active{transform:scale(.96);border-color:var(--c)}
+.dt .di{width:38px;height:38px;border-radius:12px;display:grid;place-items:center;background:color-mix(in srgb,var(--c) 18%,transparent);margin-bottom:6px}
+.dt .di svg{width:20px;height:20px;fill:none;stroke:var(--c);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.dt b{font-size:14.5px}.dt small{font-size:11.5px;color:var(--muted);line-height:1.35}
+.dset{border-top:1px solid var(--line);padding-top:6px}
+.dset summary{list-style:none;cursor:pointer;padding:12px 2px;font:600 14px var(--body);color:var(--muted);display:flex;justify-content:space-between}
+.dset summary::after{content:"›";transition:transform .25s}.dset[open] summary::after{transform:rotate(90deg)}
+.dset summary::-webkit-details-marker{display:none}
+.dset>div{margin-bottom:16px}
+.lnk.danger,.go.danger{color:var(--spend)}
+.go.danger{background:color-mix(in srgb,var(--spend) 18%,var(--solid));box-shadow:none;border:1px solid color-mix(in srgb,var(--spend) 45%,transparent)}
+/* forms */
+.tgrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.tgrid button{display:grid;justify-items:center;gap:6px;padding:12px 4px;border-radius:16px;background:var(--surface);border:1px solid var(--line);font:600 11.5px var(--body);color:var(--muted);transition:border-color .2s,background .2s}
+.tgrid button[aria-pressed="true"]{border-color:var(--c);color:var(--ink);background:color-mix(in srgb,var(--c) 14%,var(--surface))}
+.esheet .rr{display:grid;grid-template-columns:1fr 1fr 36px;gap:8px;align-items:center}
+.esheet .rr button{width:36px;height:36px;border-radius:50%;background:var(--chip);font-size:18px;color:var(--muted)}
+.esheet .addr{justify-self:start;color:var(--neon);font-weight:600;font-size:14px;padding:4px 0}
+.more2{border:1px solid var(--line);border-radius:16px;padding:0 14px;background:var(--surface)}
+.more2 summary{cursor:pointer;padding:13px 0;font:600 13.5px var(--body);color:var(--muted)}
+.more2[open]{padding-bottom:12px}.more2 .fld{margin-top:10px}
+.chk{display:flex;gap:10px;align-items:center;font-size:13.5px;color:var(--ink);padding:6px 2px}
+.chk input{width:20px;height:20px;accent-color:var(--neon)}
+.seg button svg{width:14px;height:14px;vertical-align:-2px;fill:none;stroke-width:1.8}
+.vcards{display:grid;gap:10px}
+.vcard{display:grid;grid-template-columns:42px minmax(0,1fr) 116px;gap:12px;align-items:center;padding:12px;border-radius:18px;background:var(--surface);border:1px solid var(--line);animation:rise .4s var(--ease) both;animation-delay:calc(var(--k,0)*40ms)}
+.vcard:focus-within{border-color:var(--c)}
+.vt b{display:block;font-size:14px}.vt small{display:block;font-size:11.5px;color:var(--muted);margin-top:2px}
+.vin{display:flex;align-items:center;gap:4px;background:var(--chip);border:1px solid var(--line);border-radius:12px;padding:0 10px}
+.vin i{font-style:normal;color:var(--muted)}
+.esheet .vin input{border:0;background:none;padding:11px 0;font:600 15px var(--mono);min-width:0}
+/* smoother, quieter moves */
+@keyframes enter3d{from{opacity:0;transform:translateX(28px)}}
+@keyframes sheetUp{from{transform:translateY(40%);opacity:0}}
+.scr.bye{animation:scrOut .2s var(--ease) forwards}@keyframes scrOut{to{opacity:0;transform:translateX(28px)}}
+.esheet.bye{animation:fadeOut .2s forwards}.esheet.bye .box{animation:sheetDown .2s var(--ease) forwards}
+@keyframes sheetDown{to{transform:translateY(40%);opacity:0}}@keyframes fadeOut{to{opacity:0}}
+.drawer.bye{animation:slideOut .2s var(--ease) forwards}@keyframes slideOut{to{transform:translateX(-100%)}}
+.scrim.bye,.sheet.bye,.add.bye{animation:fadeOut .2s forwards}
+.swap{animation:swapIn .25s var(--ease)}@keyframes swapIn{from{opacity:.2;transform:translateY(6px)}}
+.hl,.tx{animation-duration:.35s}
+@keyframes rise{from{opacity:0;transform:translateY(8px)}}
+:root.calm #bg3d{display:none}
+:root.calm .fc{transition:none}
