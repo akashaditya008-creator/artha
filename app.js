@@ -1,7 +1,7 @@
-/* Artha 3.0 — investments + insurance. Data lives in the "Artha – My Investments" Google Sheet via the Apps Script API. */
+/* Artha 3.1 — investments + insurance. Data lives in the "Artha – My Investments" Google Sheet via the Apps Script API. */
 (()=>{
 "use strict";
-const APP_VERSION="3.0.1";
+const APP_VERSION="3.1";
 const PROJECT_URL="https://claude.ai/project/01a1965d-e312-704a-8114-16f0090c8706";
 const $=id=>document.getElementById(id);
 const store={get(k,d){try{const v=localStorage.getItem("artha:"+k);return v==null?d:JSON.parse(v);}catch(e){return d;}},set(k,v){try{localStorage.setItem("artha:"+k,JSON.stringify(v));}catch(e){}}};
@@ -119,6 +119,37 @@ function recMap(){ const R=new Map(); ((DATA&&DATA.rec)||[]).forEach(r=>R.set(r[
   OUT.filter(o=>o.kind==="rec").forEach(o=>o.ops.forEach(op=>{ if(op.del) R.delete(op.id); else R.set(op.id,{id:op.id,kind:op.kind,d:op.data,pending:1}); })); return R; }
 const recs=kind=>[...M.rec.values()].filter(r=>r.kind===kind);
 
+/* ---------- live NAVs (AMFI data via mfapi.in), refreshed once a day ---------- */
+let NAV=store.get("nav",{}), NAVMAP=store.get("navmap",{}), NAVBUSY=false;
+const MFAPI="https://api.mfapi.in/mf";
+const navWords=s=>String(s||"").toLowerCase().replace(/[^a-z0-9& ]/g," ").split(/\s+/).filter(w=>w&&!/^(direct|growth|plan|fund|option|the|regular|idcw|ltd|limited|scheme)$/.test(w));
+const isoNav=s=>{ const m=/^(\d{2})-(\d{2})-(\d{4})$/.exec(s||""); return m?`${m[3]}-${m[2]}-${m[1]}`:""; };
+async function getJ(u){ const r=await fetch(u,{cache:"no-store"}); if(!r.ok) throw new Error("NAV service "+r.status); return r.json(); }
+/* find the Direct · Growth scheme code for a fund name (cached on this phone) */
+async function schemeOf(name){ const k=keyName(name); if(NAVMAP[k]) return NAVMAP[k];
+  const want=navWords(name); let L=[];
+  for(const n of [5,4,3]){ const q=want.slice(0,n).join(" "); if(!q) break; try{ L=await getJ(MFAPI+"/search?q="+encodeURIComponent(q)); }catch(e){ throw e; } if(L&&L.length) break; }
+  const ok=(L||[]).filter(x=>/direct/i.test(x.schemeName)&&/growth/i.test(x.schemeName)&&!/idcw|dividend|bonus|payout|reinvest/i.test(x.schemeName));
+  let best=null, bs=-1; ok.forEach(x=>{ const w=navWords(x.schemeName), hit=want.filter(t=>w.includes(t)).length, sc=hit-0.1*Math.max(0,w.length-hit); if(sc>bs){ bs=sc; best=x; } });
+  if(!best||bs<Math.min(2,want.length)) return null;
+  NAVMAP[k]={code:best.schemeCode,sn:best.schemeName}; store.set("navmap",NAVMAP); return NAVMAP[k]; }
+/* latest NAV for every fund held; quiet on failure (the last known price stays) */
+async function refreshNavs(force){ if(NAVBUSY||!M) return; const day=TODAY(), fresh=!force&&store.get("navDay","")===day;
+  const F=[...new Map(M.hold.filter(h=>h.asset==="Mutual Funds").map(h=>[keyName(h.name),h.name])).entries()].filter(([k])=>!fresh||!NAV[k]); if(!F.length) return;
+  NAVBUSY=true; let n=0;
+  try{ for(let i=0;i<F.length;i+=5) await Promise.all(F.slice(i,i+5).map(async([k,name])=>{ try{ const s=await schemeOf(name); if(!s) return; const j=await getJ(MFAPI+"/"+s.code+"/latest"), e=j&&j.data&&j.data[0];
+        if(e&&+e.nav>0){ NAV[k]={nav:+e.nav,d:isoNav(e.date)||day,code:s.code,sn:s.sn}; n++; } }catch(e){} }));
+  } finally { NAVBUSY=false; }
+  if(n){ store.set("nav",NAV); store.set("navDay",day); refresh(); } }
+/* NAV on (or just before) a date — used when an order has no units */
+async function navOn(name,iso){ const s=await schemeOf(name); if(!s) throw new Error("fund not found");
+  const j=await getJ(MFAPI+"/"+s.code), D=(j&&j.data)||[]; for(const e of D){ const d=isoNav(e.date); if(d&&d<=iso&&+e.nav>0) return {nav:+e.nav,d}; }
+  throw new Error("no NAV"); }
+/* Groww equity delivery charges (estimate, used only when the net amount isn't typed) */
+function estCharges(side,val){ if(!(val>0)) return 0; const brk=Math.max(5,Math.min(20,val*0.001)), stt=val*0.001, exc=val*0.0000297, sebi=val*1e-6, stamp=side==="B"?val*0.00015:0, gst=0.18*(brk+exc+sebi), dp=side==="S"?15.93:0;
+  return Math.round((brk+stt+exc+sebi+stamp+gst+dp)*100)/100; }
+const r2=x=>Math.round(x*100)/100, r4=x=>Math.round(x*10000)/10000;
+
 function build(){
   const D=(DATA&&DATA.v===3)?DATA:{led:[],rec:[]}, today=TODAY(), rec=recMap();
   let rows=D.led.map(r=>({id:r[0],date:r[1],who:r[2]||"Aditya",acct:r[3],asset:r[4],type:r[5],name:r[6],code:r[7],qty:+r[8]||0,price:+r[9]||0,amount:+r[10]||0,via:r[11],note:r[12],row:r[13]}));
@@ -160,6 +191,7 @@ function build(){
     else if(r.type==="Sell"||r.type==="Redeem"){ const q=r.qty||(h.px?r.amount/h.px:0), fr=h.qty>0?Math.min(1,q/h.qty):1; h.inv-=h.inv*fr; h.qty=Math.max(0,h.qty-q); if(r.qty&&r.date>=h.pxd){ h.px=r.amount/r.qty; h.pxd=r.date; } }
     else return;
     h.upd=r.date; if(r.name&&r.name.length>h.name.length&&r.asset!=="Mutual Funds") h.name=r.name; if(r.code) h.isin=r.code; });
+  for(const h of hm.values()){ if(h.asset!=="Mutual Funds") continue; const n=NAV[keyName(h.name)]; if(n&&n.d>=h.pxd){ h.px=n.nav; h.pxd=n.d; h.nav=n; } }
   const hold=[...hm.values()].filter(h=>h.qty>1e-6).map(h=>Object.assign(h,{cur:h.qty*h.px,avg:h.qty?h.inv/h.qty:0,date:h.pxd||h.upd,moved:h.upd>h.pxd}));
   ["Stocks","Mutual Funds"].forEach(a=>hold.filter(h=>h.a===a).sort((x,y)=>y.cur-x.cur).forEach((h,k)=>h.col=AVC[k%AVC.length]));
   hold.forEach((h,i)=>{ h.i=i; h.gain=h.cur-h.inv; });
@@ -534,9 +566,10 @@ const dl=F=>`<dl class="elist">${F.filter(Boolean).map(([k,v])=>`<dt>${esc(k)}</
 const closeBtn=`<button class="x" type="button" data-close>Close</button>`;
 function holdSheet(h){ if(!h) return; const isMF=h.a==="Mutual Funds", all=holdFor(h.a,"all"), share=SUM(all,x=>x.cur)?h.cur/SUM(all,x=>x.cur):null, gp=h.inv?h.gain/h.inv:null;
   const orders=M.tx.filter(t=>t.a===h.a&&t.cat===h.tab&&t.name&&keyName(t.name)===keyName(h.name));
+  const fl=orders.filter(t=>t.date&&["Buy","Sell","Redeem"].includes(t.type)).map(t=>[t.date,t.type==="Buy"?-t.show:t.show]); if(h.cur>0) fl.push([M.today,h.cur]); const hx=xirr(fl);
   openE(`<div class="eamt num" style="color:var(--ink)">${money(h.cur,false)}</div><div class="t">${esc(h.name)}</div>
-    ${dl([["Gain",`<span class="${cls(h.gain)}">${smoney(h.gain)}${gp!=null?" ("+pct(gp)+")":""}</span>`],["Invested",money(h.inv,false)],[isMF?"Units":"Quantity",h.qty?qtyf(h.qty):"—"],!isMF&&h.avg?["Average buy price",money(h.avg,false)]:null,
-      !isMF&&h.qty?["Last price",money(h.cur/h.qty,false)]:null,isMF&&h.qty?["NAV (last known)",HIDE?"••":"₹"+(h.cur/h.qty).toFixed(2)]:null,["Investor",esc(h.who)],["Platform",esc(h.plat)],
+    ${dl([["Gain",`<span class="${cls(h.gain)}">${smoney(h.gain)}${gp!=null?" ("+pct(gp)+")":""}</span>`],["Invested",money(h.inv,false)],hx!=null?["Return a year (XIRR)",`<span class="${cls(hx)}">${pct(hx)}</span>`]:null,[isMF?"Units":"Quantity",h.qty?qtyf(h.qty):"—"],!isMF&&h.avg?["Average buy price",money(h.avg,false)]:null,
+      !isMF&&h.qty?["Last price",money(h.cur/h.qty,false)]:null,isMF&&h.qty?[h.nav?"NAV · "+fmtDs(h.nav.d):"NAV (last known)",HIDE?"••":"₹"+(h.cur/h.qty).toFixed(4)]:null,h.nav?["Scheme (AMFI)",esc(h.nav.sn)]:null,["Investor",esc(h.who)],["Platform",esc(h.plat)],
       share!=null?["Share of all "+(isMF?"funds":"stocks"),pctp(share)]:null,h.isin?["ISIN",esc(h.isin)]:null,["As of",fmtD(h.upd||h.date)]])}
     ${orders.length?`<div class="gh"><span>Your entries · ${orders.length}</span><b class="num">${money(SUM(orders,t=>t.type==="Buy"?t.show:t.type==="Sell"||t.type==="Redeem"?-t.show:0),true)}</b></div><div class="list">${orders.slice().sort((a,b)=>a.date<b.date?1:-1).map(txRow).join("")}</div>`:""}
     <div class="btns"><button class="x" type="button" id="hSell">${isMF?"Redeem":"Sell"}</button><button class="go" type="button" id="hBuy">${isMF?"Invest more":"Buy more"}</button></div>${closeBtn}`);
@@ -636,8 +669,9 @@ function polCal(pid,title,end,on){ if(!end) return []; const d=addDays(end,-15)<
 /* ---------- values ---------- */
 function npsValue(){ openValues("NPS"); }
 function unitLabel(u){ return [u.h==="Others"?"NPS":CLS[u.h].label, u.acct+(holderOf(u.acct)!==u.who?" · "+u.who+"'s money":"")]; }
-function openValues(h){ const key=h==="NPS"?"Others":h, U=M.units.filter(u=>u.h!=="Bonds"&&(!key||u.h===key)&&(u.cur>0||u.V.length)).sort((a,b)=>b.cur-a.cur), vals={};
-  openE(`<div class="t big">Update today's values</div><div class="s" style="text-align:left">Open the app for each account and type what it shows as the current value. Leave a box empty to keep the last value.</div>
+const navAuto=u=>{ if(u.h!=="Mutual Funds") return false; const H=M.hold.filter(x=>x.tab===u.tab); return H.length>0&&H.every(x=>x.nav); };
+function openValues(h){ const key=h==="NPS"?"Others":h, U0=M.units.filter(u=>u.h!=="Bonds"&&(!key||u.h===key)&&(u.cur>0||u.V.length)), U=U0.filter(u=>!navAuto(u)).sort((a,b)=>b.cur-a.cur), nAuto=U0.length-U.length, vals={};
+  openE(`<div class="t big">Update today's values</div><div class="s" style="text-align:left">Open the app for each account and type what it shows as the current value. Leave a box empty to keep the last value.${nAuto?" Mutual funds update by themselves from each fund's latest NAV.":""}</div>
     <div class="vcards">${U.map((u,k)=>{ const [t,sub]=unitLabel(u), cl=u.h==="Others"?"NPS":u.h, col=CLS[cl].col;
       return `<label class="vcard" style="--c:${col};--k:${k}"><span class="av" style="background:${col}">${svgI(CLS[cl].icon,"#fff",18)}</span><span class="vt"><b>${esc(t)}</b><small>${esc(sub)}</small><small class="num">${u.valued?`Now ${money(u.cur,true)} · ${fmtDs(u.asof)}`:"No value yet"}</small></span><span class="vin"><i>₹</i><input inputmode="numeric" data-vc="${esc(u.tab)}" placeholder="Today"></span></label>`; }).join("")||`<div class="empty">Nothing to value here.</div>`}</div>
     <div class="err" id="vErr"></div><button class="go" type="button" id="vOk">Save values</button>${closeBtn}`);
@@ -896,7 +930,9 @@ function acctsFor(type){ const fit={stocks:/groww|zerodha|upstox|angel|kite/i,us
 function openAdd(mode,pre){ A.mode=mode==="out"?"out":"in"; A.digits=""; A.date=TODAY(); A.pre=pre||{}; A.det={name:A.pre.name||undefined,acct:A.pre.acct}; A.type=null;
   A.who=A.pre.inv||(WHO!=="all"?WHO:"Aditya");
   $("aErr").textContent=""; setStep("pad"); showAmt(); showDate(); paintMode(); paintWho();
-  if(!isOpen($("addSheet"))) ov.open($("addSheet"),()=>{ vanish($("addSheet")); }); }
+  if(!isOpen($("addSheet"))) ov.open($("addSheet"),()=>{ vanish($("addSheet")); });
+  if(A.pre.name&&TRADE.includes(A.pre.type)) pickType(A.pre.type); }
+const TRADE=["stocks","us","mf"];
 function paintMode(){ $("aMode").querySelectorAll("button").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.m===A.mode)));
   const c=A.pre.a&&CLS[A.pre.a]?CLS[A.pre.a].label.toLowerCase():"";
   $("addTitle").textContent=A.pre.name?(A.mode==="out"?"Sell · ":"Buy · ")+A.pre.name:A.pre.type==="term"?"Term premium":A.mode==="out"?(c?"Take out of "+c:"Withdraw or sell"):(c?"Add to "+c:"New entry"); }
@@ -911,12 +947,12 @@ $("aBack").onclick=()=>{ A.digits=A.digits.slice(0,-1); showAmt(); };
 $("aPad").querySelectorAll("[data-k]").forEach(b=>b.onclick=()=>{ const k=b.dataset.k; $("aErr").textContent=""; if(k==="back") A.digits=A.digits.slice(0,-1); else if(A.digits.length<11) A.digits=(A.digits+k).replace(/^0+/,""); showAmt(); if(navigator.vibrate) navigator.vibrate(6); });
 addEventListener("keydown",e=>{ if(!isOpen($("addSheet"))||A.step!=="pad"||/INPUT|TEXTAREA/.test(document.activeElement.tagName)) return;
   if(/^\d$/.test(e.key)){ A.digits=(A.digits+e.key).replace(/^0+/,"").slice(0,11); showAmt(); } else if(e.key==="Backspace"){ A.digits=A.digits.slice(0,-1); showAmt(); } else if(e.key==="Enter") $("aChoose").click(); });
-$("aChoose").onclick=()=>{ if(!amtNum()){ $("aErr").textContent="Enter the amount first."; return; } const L2=typesNow(); if(L2.length===1){ pickType(L2[0][0]); } else { drawCats(); setStep("cats"); } };
+$("aChoose").onclick=()=>{ if(!amtNum()&&!typesNow().some(t=>TRADE.includes(t[0]))){ $("aErr").textContent="Enter the amount first."; return; } const L2=typesNow(); if(L2.length===1){ pickType(L2[0][0]); } else { drawCats(); setStep("cats"); } };
 $("closeAdd").onclick=()=>{ if(A.step==="det"){ const L2=typesNow(); if(L2.length>1){ drawCats(); setStep("cats"); } else setStep("pad"); } else if(A.step==="cats") setStep("pad"); else ov.back(); };
 function drawCats(){ const L2=typesNow();
   $("aCats").innerHTML=L2.map(t=>`<button type="button" class="card" data-t="${t[0]}" style="color:${TCOL[t[0]]}">${svgI(t[2],TCOL[t[0]])}<span style="color:var(--ink)">${t[1]}</span></button>`).join("");
   $("aCats").querySelectorAll("[data-t]").forEach(b=>b.onclick=()=>pickType(b.dataset.t)); }
-function pickType(t){ A.type=t; const keepAcct=A.pre.acct; A.det={name:A.pre.name||undefined,acct:keepAcct||store.get("acct:"+t,"")}; if(t==="term") A.who="Aditya"; drawDet(); setStep("det"); }
+function pickType(t){ if(!amtNum()&&!TRADE.includes(t)){ setStep("pad"); $("aErr").textContent="Enter the amount first."; return; } A.type=t; const keepAcct=A.pre.acct; A.det={name:A.pre.name||undefined,acct:keepAcct||store.get("acct:"+t,"")}; if(t==="term") A.who="Aditya"; drawDet(); setStep("det"); }
 function recentOf(f,filter){ const seen=[]; M.tx.filter(t=>t[f]&&(!filter||filter(t))).sort((a,b)=>(b.date||"")<(a.date||"")?-1:1).forEach(t=>{ if(!seen.includes(t[f])) seen.push(t[f]); }); return seen; }
 function fdSched(P,rate,start,end,pay){ const r=rate/100, S=[]; if(!(P>0&&r>0&&end>start)) return S;
   if(pay==="end"){ const yrs=days(start,end)/365, amt=P*Math.pow(1+r/4,4*yrs); S.push({d:end,p:P,i:Math.round((amt-P)*100)/100}); return S; }
@@ -930,22 +966,31 @@ function drawDet(){
   if(!d.acct) d.acct=AC.find(a=>holderOf(a)===A.who)||AC[0]||""; const showA=[...new Set([d.acct].concat(AC))].filter(Boolean).slice(0,8);
   if(d.via==null) d.via=stock?"Balance":mf?"Bank":"Bank";
   const held=stock||mf?M.hold.filter(h=>h.acct===d.acct&&h.asset===T[3]).map(h=>h.name):[];
+  const heldH=(stock||mf)&&!inv?M.hold.filter(h=>h.acct===d.acct&&h.who===A.who&&h.asset===T[3]).sort((a,b)=>b.cur-a.cur):[];
+  if(heldH.length&&!heldH.some(h=>h.name===d.name)){ const m=d.name&&heldH.find(h=>keyName(h.name)===keyName(d.name)); d.name=(m||heldH[0]).name; }
+  const hsel=heldH.find(h=>h.name===d.name)||null;
+  if(d.amt==null) d.amt=amtNum()?String(amtNum()):""; if(d.net==null) d.net=amtNum()?String(amtNum()):"";
   const bondsHere=(isBond||fd)&&!inv?M.bonds.filter(b=>!b.closed&&b.acct===d.acct).map(b=>b.name):[];
   const names=[...new Set(held.concat(bondsHere,recentOf("name",t=>t.acct===d.acct&&t.asset===T[3])))], nameL=isBond?"Bond name":fd?"Bank / FD name":mf?"Fund":"Stock";
   if(!d.reps) d.reps=[{d:"",a:""}]; if(d.remind==null) d.remind=remindPref(); if(!d.fdPay) d.fdPay="end";
-  const keep=()=>{ const g=id=>$(id)?$(id).value:undefined; ["name","note","qty","rate","end"].forEach(k=>{ const v=g("d"+k[0].toUpperCase()+k.slice(1)); if(v!==undefined) d[k]=v; }); const o=g("dAcctO"); if(o!==undefined) d.acct=o.trim();
+  const keep=()=>{ const g=id=>$(id)?$(id).value:undefined; ["name","note","qty","rate","end","amt","net","px"].forEach(k=>{ const v=g("d"+k[0].toUpperCase()+k.slice(1)); if(v!==undefined) d[k]=v; }); const o=g("dAcctO"); if(o!==undefined) d.acct=o.trim();
     const rr=[...document.querySelectorAll("#dReps .rr")]; if(rr.length) d.reps=rr.map(r=>({d:r.querySelector("input[type=date]").value,a:r.querySelector("input[inputmode]").value})); };
   const q=numIn(d.qty), px=q?amtNum()/q:0;
   const verb=inv?(term?"Premium":stock?"Buying":cash?"Adding to account":"Investing"):stock?"Selling":isBond?"Money back":cash?"Taking out":"Taking out";
   const viaSeg=stock?`<div class="fld"><span>${inv?"Paid from":"Money goes to"}</span><div class="seg sm" id="dVia"><button type="button" data-v="Balance" aria-pressed="${d.via==="Balance"}">${inv?"Account balance":"Stays in account"}</button><button type="button" data-v="Bank" aria-pressed="${d.via==="Bank"}">${inv?"Bank (adds the money too)":"My bank"}</button></div></div>`
     :mf&&/groww/i.test(d.acct)?`<div class="fld"><span>${inv?"Paid from":"Money goes to"}</span><div class="seg sm" id="dVia"><button type="button" data-v="Bank" aria-pressed="${d.via==="Bank"}">My bank</button><button type="button" data-v="Balance" aria-pressed="${d.via==="Balance"}">Groww balance</button></div></div>`:"";
-  $("aDet").innerHTML=`<div class="sumline"><span><small style="display:block;color:var(--muted);font-size:12px">${esc(label)} · ${A.date===TODAY()?"today":fmtD(A.date)}</small>${verb}</span><b class="num">₹${amtNum().toLocaleString("en-IN")}</b></div>
+  $("aDet").innerHTML=`<div class="sumline"><span><small style="display:block;color:var(--muted);font-size:12px">${esc(label)} · ${A.date===TODAY()?"today":fmtD(A.date)}</small>${verb}</span><b class="num" id="dSum">₹${amtNum().toLocaleString("en-IN")}</b></div>
     ${term?"":`<div class="fld"><span>Whose money</span><div class="seg sm" id="dWho">${WHOS.map(w=>`<button type="button" data-v="${w}" aria-pressed="${A.who===w}">${w}</button>`).join("")}</div></div>`}
     ${term?"":`<div class="fld"><span>Account</span><div class="seg sm wrap" id="dAcct">${showA.map(a=>`<button type="button" data-v="${esc(a)}" aria-pressed="${!d.acctOther&&a===d.acct}">${esc(a)}</button>`).join("")}<button type="button" data-v="__o" aria-pressed="${!!d.acctOther}">New account</button></div>${d.acctOther?`<input id="dAcctO" value="${esc(d.acct||"")}" maxlength="50" placeholder="e.g. HDFC Bank · Spardha">`:""}${d.acct&&holderOf(d.acct)!==A.who&&!nps?`<small class="hint" style="display:block;margin-top:6px">${esc(A.who)}'s money in ${esc(holderOf(d.acct))}'s account — tracked as ${esc(A.who)}'s.</small>`:""}</div>`}
     ${isBond&&inv?`<button class="ai" id="dShot" type="button">${svgI("spark","var(--neon2)")}<span><b>Fill from screenshots</b><small>Upload the platform's screenshots; Claude reads the name, repayment dates, principal and interest</small></span></button>`:""}
-    ${!term&&!cash&&!nps?`<label class="fld"><span>${nameL}</span><input id="dName" list="dNames" value="${esc(d.name||"")}" maxlength="120" autocomplete="off"><datalist id="dNames">${names.map(n=>`<option value="${esc(n)}">`).join("")}</datalist></label>`:""}
-    ${stock?`<label class="fld"><span>Quantity (shares)</span><input id="dQty" inputmode="decimal" value="${esc(d.qty||"")}" autocomplete="off"></label><div class="calc" id="dPx">${q?`<div><span>Price per share</span><b>${esc(rs(px,false))}</b></div>`:"<div><span>Amount is the total, including charges. Quantity gives the price.</span></div>"}</div>`:""}
-    ${mf?`<label class="fld"><span>Units (optional, from the order confirmation)</span><input id="dQty" inputmode="decimal" value="${esc(d.qty||"")}" autocomplete="off"></label>`:""}
+    ${heldH.length?`<label class="fld"><span>${nameL} · from your holdings</span><select id="dName">${heldH.map(h=>`<option value="${esc(h.name)}"${h.name===d.name?" selected":""}>${esc(h.name)} · ${qtyf(h.qty)} ${mf?"units":"shares"} · ${esc(rs(h.cur,false))}</option>`).join("")}</select></label>`
+    :!term&&!cash&&!nps?`<label class="fld"><span>${nameL}</span><input id="dName" list="dNames" value="${esc(d.name||"")}" maxlength="120" autocomplete="off"><datalist id="dNames">${names.map(n=>`<option value="${esc(n)}">`).join("")}</datalist></label>`:""}
+    ${stock?`<div class="btns"><label class="fld"><span>Quantity</span><input id="dQty" inputmode="decimal" value="${esc(d.qty||"")}" autocomplete="off"></label><label class="fld"><span>Price / share ₹</span><input id="dPx" inputmode="decimal" value="${esc(d.px||"")}" autocomplete="off"></label></div>
+      ${hsel?`<button type="button" class="addr" id="dAll">Sell all ${qtyf(hsel.qty)} shares</button>`:""}
+      <label class="fld"><span>${inv?"Total paid incl. charges (optional)":"Received after charges (optional)"}</span><input id="dNet" inputmode="decimal" value="${esc(d.net||"")}" placeholder="From the order / contract note" autocomplete="off"></label><div class="calc" id="dCalc"></div>`:""}
+    ${mf?`<label class="fld"><span>${inv?"Amount paid ₹":"Amount received ₹ (optional)"}</span><input id="dAmt" inputmode="decimal" value="${esc(d.amt||"")}" autocomplete="off"></label>
+      <label class="fld"><span>${inv?"Units (optional, from the order confirmation)":"Units to redeem"}</span><input id="dQty" inputmode="decimal" value="${esc(d.qty||"")}" autocomplete="off"></label>
+      ${hsel?`<button type="button" class="addr" id="dAll">Redeem all ${qtyf(hsel.qty)} units</button>`:""}<div class="calc" id="dCalc"></div>`:""}
     ${viaSeg}
     ${fd?`<div class="btns"><label class="fld"><span>Interest rate (% a year)</span><input id="dRate" inputmode="decimal" value="${esc(d.rate||"")}"></label><label class="fld"><span>Matures on</span><input id="dEnd" type="date" value="${esc(d.end||"")}" min="${A.date}"></label></div>
       <div class="fld"><span>Interest is paid</span><div class="seg sm" id="dFdPay"><button type="button" data-v="end" aria-pressed="${d.fdPay==="end"}">At maturity</button><button type="button" data-v="q" aria-pressed="${d.fdPay==="q"}">Every quarter</button><button type="button" data-v="m" aria-pressed="${d.fdPay==="m"}">Every month</button></div></div>
@@ -955,10 +1000,22 @@ function drawDet(){
     <label class="fld"><span>${inv?"Note (optional)":"Reason (optional)"}</span><textarea id="dNote" rows="2" maxlength="250">${esc(d.note||"")}</textarea></label>
     <div class="err" id="dErr" role="alert"></div><button type="button" class="btn1" id="dSave">${inv?(term?"Save premium":isBond?"Save bond":fd?"Save FD":stock?"Save buy":"Save"):stock?"Save sale":isBond?"Save payout":"Save withdrawal"}</button>`;
   const seg=(id,fn)=>{ const el=$(id); if(el) el.querySelectorAll("[data-v]").forEach(b=>b.onclick=()=>{ keep(); fn(b.dataset.v); drawDet(); }); };
-  seg("dWho",v=>{ A.who=v; paintWho(); if(nps) d.acct="NPS · "+v; });
-  seg("dAcct",v=>{ if(v==="__o"){ d.acctOther=1; d.acct=""; setTimeout(()=>$("dAcctO")&&$("dAcctO").focus(),30); } else { d.acctOther=0; d.acct=v; } });
+  seg("dWho",v=>{ A.who=v; paintWho(); if(nps) d.acct="NPS · "+v;
+    else if(!d.acctPicked&&!d.acctOther&&holderOf(d.acct)!==v){ const tw=AC.find(a=>platOf(a)===platOf(d.acct)&&holderOf(a)===v); if(tw) d.acct=tw; } });
+  seg("dAcct",v=>{ if(v==="__o"){ d.acctOther=1; d.acct=""; setTimeout(()=>$("dAcctO")&&$("dAcctO").focus(),30); } else { d.acctOther=0; d.acct=v; d.acctPicked=1; } });
   seg("dVia",v=>d.via=v); seg("dFdPay",v=>d.fdPay=v);
-  const qi=$("dQty"); if(qi&&stock) qi.oninput=()=>{ const n=numIn(qi.value); $("dPx").innerHTML=n?`<div><span>Price per share</span><b>${esc(rs(amtNum()/n,false))}</b></div>`:"<div><span>Quantity gives the price per share.</span></div>"; };
+  const nm=$("dName"); if(nm&&nm.tagName==="SELECT") nm.onchange=()=>{ keep(); d.qty=""; drawDet(); };
+  const all=$("dAll"); if(all) all.onclick=()=>{ keep(); d.qty=String(r4(hsel.qty)); drawDet(); };
+  const calc=()=>{ const el=$("dCalc"); if(!el) return; const v=id=>numIn($(id)?$(id).value:""), sum=$("dSum");
+    if(stock){ const T2=tradeCalc(inv,v("dQty"),v("dPx"),v("dNet"),d.acct,type==="us");
+      el.innerHTML=T2.val?`<div><span>Trade value</span><b>${esc(rs(T2.val,false))}</b></div><div><span>Charges${T2.est?" (estimated, Groww rates)":T2.ch?"":" (none added)"}</span><b>${esc(T2.ch?"₹"+T2.ch.toLocaleString("en-IN"):"₹0")}</b></div><div><span>${inv?"Total paid":"You receive"}</span><b>${esc(rs(T2.net,false))}</b></div>`
+        :"<div><span>Quantity × price gives the trade value. Charges are added as their own entry.</span></div>";
+      if(sum) sum.textContent=T2.net?rs(T2.net,false):"₹0"; }
+    else if(mf){ const a=v("dAmt"), u=v("dQty"), px=hsel&&hsel.qty?hsel.cur/hsel.qty:0;
+      el.innerHTML=(hsel?`<div><span>You hold</span><b>${qtyf(hsel.qty)} units</b></div>`+(px?`<div><span>NAV${hsel.nav?" · "+fmtDs(hsel.nav.d):""}</span><b>₹${px.toFixed(4)}</b></div>`:"")+(u&&px?`<div><span>≈ value of these units</span><b>${esc(rs(u*px,false))}</b></div>`:""):"")
+        +((!u&&a)||(u&&!a&&!inv)?`<div><span>${!u?"Units":"Amount"} worked out from the NAV of ${A.date===TODAY()?"today":fmtDs(A.date)} when you save</span></div>`:"")||"<div><span>Units from the order confirmation keep this fund's value exact.</span></div>";
+      if(sum) sum.textContent=a?rs(a,false):u&&px?"≈"+rs(u*px,false):"₹0"; } };
+  ["dQty","dPx","dNet","dAmt"].forEach(id=>{ const el=$(id); if(el) el.oninput=calc; }); calc();
   const fdc=()=>{ const el=$("dFdC"); if(!el) return; const S=fdSched(amtNum(),numIn($("dRate").value),A.date,$("dEnd").value,d.fdPay), I=SUM(S,e=>e.i);
     el.innerHTML=S.length?`<div><span>${S.length} payment${S.length>1?"s":""} · interest before TDS</span><b>${esc(rs(I,false))}</b></div><div><span>Back at maturity</span><b>${esc(rs(S[S.length-1].p+S[S.length-1].i,false))}</b></div>`:"<div><span>Type the rate and the maturity date.</span></div>"; };
   if(fd){ $("dRate").oninput=fdc; $("dEnd").onchange=fdc; fdc(); }
@@ -969,14 +1026,31 @@ function drawDet(){
   bindRemind("dRem",v=>d.remind=v);
   $("dSave").onclick=()=>{ keep(); saveEntry(); };
 }
+function tradeCalc(inv,q,px,net,acct,us){ const val=r2(q*px); if(!(val>0)) return {val:0,ch:0,net:0,est:false};
+  let ch=0, est=false; if(net>0) ch=Math.max(0,r2(inv?net-val:val-net)); else if(!us&&/groww/i.test(acct||"")){ ch=estCharges(inv?"B":"S",val); est=true; }
+  return {val,ch,est,net:r2(inv?val+ch:val-ch)}; }
 function saveEntry(){ const d=A.det, type=A.type, T=typeOf(type), inv=A.mode==="in", amt=amtNum(), name=(d.name||"").trim(), note=(d.note||"").trim(), err=m=>{ $("dErr").textContent=m; };
-  const acct=(d.acct||"").trim(); if(!acct) return err("Pick an account, or type a new one.");
+  const acct=(d.acct||"").trim(); if(!acct) return err("Pick an account, or type a new one."); if(!TRADE.includes(type)&&!(amt>0)) return err("Go back and enter the amount.");
   const base={date:A.date,who:A.who,acct,asset:T[3],name,note,via:""}, rows=[]; let recOp=null, cal=[];
-  if(type==="stocks"||type==="us"){ const q=numIn(d.qty); if(!name) return err("Type the stock's name."); if(!(q>0)) return err("Type the number of shares.");
-    if(inv&&d.via==="Bank") rows.push({...base,asset:"Cash",type:"Add money",name:"",amt,via:"Bank",note:"Bank → "+acct});
-    rows.push({...base,type:inv?"Buy":"Sell",qty:q,price:Math.round(amt/q*100)/100,amt,via:"Balance"});
-    if(!inv&&d.via==="Bank") rows.push({...base,asset:"Cash",type:"Withdraw",name:"",amt,via:"Bank",note:acct+" → bank"}); }
-  else if(type==="mf"){ if(!name) return err("Type the fund's name."); const q=numIn(d.qty); rows.push({...base,type:inv?"Buy":"Redeem",qty:q||"",price:q?Math.round(amt/q*10000)/10000:"",amt,via:d.via||"Bank"}); }
+  const hq=!inv?SUM(M.hold.filter(h=>h.acct===acct&&h.who===A.who&&h.asset===T[3]&&keyName(h.name)===keyName(name)),h=>h.qty):0;
+  if(type==="stocks"||type==="us"){ const q=numIn(d.qty); let px=numIn(d.px); const nt=numIn(d.net); if(!name) return err("Pick or type the stock."); if(!(q>0)) return err("Type the number of shares.");
+    if(!inv&&hq&&q>hq*1.0001) return err(`Only ${qtyf(hq)} shares held here.`);
+    if(!(px>0)&&nt>0) px=r2(nt/q); if(!(px>0)) return err("Type the price per share.");
+    const C=tradeCalc(inv,q,px,nt,acct,type==="us"), chNote=C.est?"Brokerage, STT & charges (estimated)":"Brokerage, STT & charges";
+    if(inv&&d.via==="Bank") rows.push({...base,asset:"Cash",type:"Add money",name:"",amt:C.net,via:"Bank",note:"Bank → "+acct});
+    rows.push({...base,type:inv?"Buy":"Sell",qty:q,price:px,amt:C.val,via:"Balance"});
+    if(C.ch>0) rows.push({...base,asset:"Cash",type:"Charges",amt:C.ch,via:"Balance",note:chNote+" · "+(inv?"buy ":"sale ")+name});
+    if(!inv&&d.via==="Bank") rows.push({...base,asset:"Cash",type:"Withdraw",name:"",amt:C.net,via:"Bank",note:acct+" → bank"});
+    return commit(rows,C.net,null,[],type,acct); }
+  else if(type==="mf"){ if(!name) return err(inv?"Type the fund's name.":"Pick the fund."); let q=numIn(d.qty), a=numIn(d.amt);
+    if(inv&&!a) return err("Type the amount paid."); if(!inv&&!q&&!a) return err("Type the units or the amount.");
+    if(!inv&&hq&&q>hq*1.0001) return err(`Only ${qtyf(hq)} units held here.`);
+    const done=(nv)=>{ let n2=note; if(nv){ if(!q) q=r4(a/nv.nav); else if(!a) a=r2(q*nv.nav); n2=(n2+` · ${!numIn(d.qty)?"units":"amount"} from NAV ₹${nv.nav} of ${fmtD(nv.d)}`).replace(/^ · /,""); }
+      rows.push({...base,note:n2,type:inv?"Buy":"Redeem",qty:q||"",price:q&&a?r4(a/q):"",amt:a,via:d.via||"Bank"}); commit(rows,a,null,[],type,acct); };
+    if(q&&a) return done(null);
+    const btn=$("dSave"); btn.disabled=true; btn.textContent="Getting the NAV…";
+    navOn(name,A.date).then(done,()=>{ btn.disabled=false; btn.textContent=inv?"Save":"Save withdrawal"; if(!a) return err("Couldn't get the NAV just now. Type the amount received."); done(null); });
+    return; }
   else if(type==="cash") rows.push({...base,type:inv?"Add money":"Withdraw",amt,via:"Bank"});
   else if(type==="nps") rows.push({...base,name:"NPS Tier I",type:inv?"Add money":"Withdraw",amt,via:"Bank"});
   else if(type==="term") rows.push({...base,who:"Aditya",acct:"Insurance",name:"Term plan",type:"Premium",amt,via:"Bank"});
@@ -990,6 +1064,8 @@ function saveEntry(){ const d=A.det, type=A.type, T=typeOf(type), inv=A.mode==="
     rows.push({...base,type:"Buy",amt,via:"Bank",note:(note+(type==="fd"?` ${numIn(d.rate)}% · matures ${fmtD(d.end)}`:"")).trim()});
     const key=acct+"|"+name; recOp={id:"bond:"+key,kind:"bond",title:name,data:{sched:S,remind:d.remind,acct,who:A.who,name,platform:platOf(acct),ytm:type==="fd"?numIn(d.rate):undefined,fd:type==="fd"?1:undefined}};
     if(d.remind==="cal") cal=bondCal(key,name,acct,S.map(e=>({d:e.d,a:e.p+e.i}))); }
+  commit(rows,amt,recOp,cal,type,acct); }
+function commit(rows,amt,recOp,cal,type,acct){
   if(recOp) OUT.push({kind:"rec",ops:[recOp],rid:rid()}); if(cal.length) queueCal(cal);
   store.set("acct:"+type,acct);
   OUT.push({kind:"add",rows,rid:rid()}); saveOut(); ov.back(); refresh(); showToast(`${rs(amt,false)} saved`); flush(); }
@@ -999,7 +1075,7 @@ let loading=false, flushing=false;
 function setSync(kind,txt){ $("syncLine").className=kind||""; $("syncTxt").textContent=txt; }
 const fmtWhen=t=>{ if(!t) return "never"; const m=Math.round((Date.now()-t)/6e4); return m<1?"just now":m<60?m+" min ago":m<1440?Math.round(m/60)+" h ago":new Date(t).toLocaleDateString("en-IN",{day:"numeric",month:"short"}); };
 const liveLine=()=>`Synced ${fmtWhen(CACHE_AT)}`+(OUT.length?` · ${OUT.length} waiting`:"");
-function applyData(d){ if(!d) return; if(d.v!==3){ DATA=d; refresh(); setSync("warn","Paste the new Artha backend (v3) and run setupV3() to see your data"); return; } DATA=d; CACHE_AT=Date.now(); store.set("cache",d); store.set("cacheAt",CACHE_AT); refresh(); setSync(OUT.length?"warn":"live",liveLine()); }
+function applyData(d){ if(!d) return; if(d.v!==3){ DATA=d; refresh(); setSync("warn","Paste the new Artha backend (v3) and run setupV3() to see your data"); return; } DATA=d; CACHE_AT=Date.now(); store.set("cache",d); store.set("cacheAt",CACHE_AT); refresh(); setSync(OUT.length?"warn":"live",liveLine()); refreshNavs(); }
 function errText(e){ const m=String(e&&e.message||e||"");
   if(/PASSCODE/.test(m)){ store.set("pass",""); askPass("Wrong passcode. 3 wrong tries lock Artha for 3 hours."); return "Passcode needed."; }
   if(/Locked/.test(m)){ if(!$("gate").hidden) $("gErr").textContent=m; return m; } return m||"Couldn't reach Google just now."; }
@@ -1037,7 +1113,7 @@ $("upBtn").onclick=()=>{ const sm=document.documentElement.classList.contains("c
 (()=>{ let y0=null, pulling=false, dist=0; const ptr=$("ptr");
   addEventListener("touchstart",e=>{ if(scrollY<=0&&!isOpen($("scr"))&&!isOpen($("addSheet"))&&!isOpen($("eSheet"))&&!isOpen($("sheet"))&&!isOpen($("drawer"))&&!e.target.closest(".stage")){ y0=e.touches[0].clientY; pulling=true; dist=0; } },{passive:true});
   addEventListener("touchmove",e=>{ if(!pulling) return; dist=Math.max(0,e.touches[0].clientY-y0); if(scrollY>0){ pulling=false; dist=0; } const h=Math.min(64,dist*.45); ptr.style.height=h+"px"; ptr.querySelector(".spin").style.setProperty("--r",(dist*2)+"deg"); $("ptrTxt").textContent=dist>130?"Release to refresh":"Pull to refresh"; },{passive:true});
-  addEventListener("touchend",()=>{ if(!pulling) return; pulling=false; if(dist>130){ ptr.classList.add("go"); ptr.style.height="44px"; $("ptrTxt").textContent="Syncing with your sheet…"; Promise.resolve(pull()).finally(()=>setTimeout(()=>{ ptr.classList.remove("go"); ptr.style.height="0"; },400)); } else ptr.style.height="0"; dist=0; }); })();
+  addEventListener("touchend",()=>{ if(!pulling) return; pulling=false; if(dist>130){ ptr.classList.add("go"); ptr.style.height="44px"; $("ptrTxt").textContent="Syncing with your sheet…"; Promise.all([pull(),refreshNavs(true)]).finally(()=>setTimeout(()=>{ ptr.classList.remove("go"); ptr.style.height="0"; },400)); } else ptr.style.height="0"; dist=0; }); })();
 const ACC=[["","Cyan","#3CF0D4"],["violet","Violet","#A98BFF"],["amber","Amber","#FFB547"],["rose","Rose","#FF6FA8"],["ice","Ice","#7CC8FF"]];
 function segs(id,opts,cur,on){ const el=$(id); el.innerHTML=opts.map(([k,l])=>`<button type="button" data-k="${k}" aria-pressed="${k===cur}">${l}</button>`).join(""); el.querySelectorAll("button").forEach(b=>b.onclick=()=>{ on(b.dataset.k); buildDrawer(); }); }
 function setCalm(on){ store.set("calm",on); document.documentElement.classList.toggle("calm",on); if(S3.setCalm) S3.setCalm(on); refresh(); }
@@ -1071,10 +1147,10 @@ $("verTxt").textContent="Version "+APP_VERSION;
 async function checkUpdate(manual){ try{ const j=await (await fetch("version.json?t="+Date.now(),{cache:"no-store"})).json();
     if(j.v&&j.v!==APP_VERSION){ $("updTxt").textContent=j.note?`New: ${j.note}`:"A new version is ready"; $("upd").hidden=false; } else if(manual) showToast("You're on the latest version"); }
   catch(e){ if(manual) showToast("Couldn't check, you seem to be offline"); } }
-async function doUpdate(){ $("updBtn").textContent="Updating…"; try{ const reg=await navigator.serviceWorker?.getRegistration(); if(reg) await reg.update(); const ks=await caches.keys(); await Promise.all(ks.map(k=>caches.delete(k))); }catch(e){} location.reload(); }
+async function doUpdate(){ $("updBtn").textContent="Updating…"; try{ const reg=await navigator.serviceWorker?.getRegistration(); if(reg) await reg.update(); const ks=await caches.keys(); await Promise.all(ks.filter(k=>k.startsWith("artha-")).map(k=>caches.delete(k))); }catch(e){} location.reload(); }
 $("updBtn").onclick=doUpdate; $("verBtn").onclick=()=>checkUpdate(true); setTimeout(checkUpdate,2500);
 document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="visible"){ checkUpdate(); refresh(); if(Date.now()-CACHE_AT>60000) pull(); } });
 if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(()=>{});
 S3.initBg($("bg3d")); { const a=ACC.find(x=>x[0]===store.get("acc","")); if(a) setTimeout(()=>S3.ringColor(a[2]),50); }
-build(); setTab(TAB_NOW); if(DATA) setSync(OUT.length?"warn":"",liveLine()); pull();
+build(); setTab(TAB_NOW); if(DATA) setSync(OUT.length?"warn":"",liveLine()); pull(); setTimeout(()=>refreshNavs(),1500);
 })();
