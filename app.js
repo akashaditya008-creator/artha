@@ -1,7 +1,7 @@
-/* Artha 2.0 — investments + insurance. Data lives in the "Artha – My Investments" Google Sheet via the Apps Script API. */
+/* Artha 3.0 — investments + insurance. Data lives in the "Artha – My Investments" Google Sheet via the Apps Script API. */
 (()=>{
 "use strict";
-const APP_VERSION="2.1";
+const APP_VERSION="3.0";
 const PROJECT_URL="https://claude.ai/project/01a1965d-e312-704a-8114-16f0090c8706";
 const $=id=>document.getElementById(id);
 const store={get(k,d){try{const v=localStorage.getItem("artha:"+k);return v==null?d:JSON.parse(v);}catch(e){return d;}},set(k,v){try{localStorage.setItem("artha:"+k,JSON.stringify(v));}catch(e){}}};
@@ -60,7 +60,7 @@ function xirr(flows){
 }
 
 /* ---------- icons ---------- */
-const P={
+const P={fd:"M3 9l9-5 9 5M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20h18",cash:"M3 7h18v10H3zM12 9.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5M6 10v.01M18 14v.01",
   stocks:"M3 17l5-5 4 4 8-8M15 8h5v5",
   mf:"M12 3a9 9 0 1 0 9 9h-9zM15 3.5A9 9 0 0 1 20.5 9H15z",
   bond:"M6 3h12v18H6zM9 8h6M9 12h6M9 16h3.5",
@@ -90,7 +90,7 @@ const svgI=(k,col,sz)=>`<svg viewBox="0 0 24 24" style="stroke:${col}${sz?`;widt
 const CLS={
   Stocks:{label:"Stocks",icon:"stocks",col:"#5B8CFF"},
   "Mutual Funds":{label:"Mutual funds",icon:"mf",col:"#2EE6B0"},
-  Bonds:{label:"Bonds",icon:"bond",col:"#FFB547"},
+  Bonds:{label:"Bonds & FDs",icon:"bond",col:"#FFB547"},
   NPS:{label:"NPS",icon:"nps",col:"#FF8A3D"},
   Others:{label:"NPS",icon:"nps",col:"#FF8A3D"},
   Term:{label:"Term insurance",icon:"term",col:"#B18CFF"}};
@@ -99,104 +99,99 @@ const AVC=["#5B8CFF","#2EE6B0","#FF6B8B","#8B7CFF","#FFB547","#35C4F0","#E86CC8"
 const initials=s=>{ const w=String(s).replace(/\b(ltd|limited|fund|direct|growth|plan|the|of|india)\b/gi,"").trim().split(/\s+/).filter(Boolean); return w.length>1?(w[0][0]+w[1][0]).toUpperCase():(w[0]||"•").slice(0,2).toUpperCase(); };
 const avColor=s=>{ let h=0; for(const ch of String(s)) h=(h*31+ch.charCodeAt(0))>>>0; return AVC[h%AVC.length]; };
 
-/* ---------- model: investor + platform + asset. Sheet tabs stay; the app hides them. ---------- */
-const MAIN="Stocks (Main)", PIKUL="Pikul – Spardha Account", SPO="Spardha (Own)", TERM="Term Insurance", SPA="Spardha's account";
-const TAB={[MAIN]:{inv:"Aditya",acct:"",def:"Stocks",plat:"Groww"},[PIKUL]:{inv:"Aditya",acct:SPA,def:"Stocks",plat:"Groww"},
-  "Mutual Funds":{inv:"Aditya",acct:"",def:"Mutual Funds"},"Bonds":{inv:"Aditya",acct:"",def:"Bonds"},[SPO]:{inv:"Spardha",acct:"",def:"Mutual Funds"},
-  "NPS":{inv:"Aditya",acct:"",def:"NPS"},[TERM]:{inv:"Aditya",acct:"",def:"Term"}};
-const tabInfo=n=>TAB[n]||{inv:"Aditya",acct:"",def:"Stocks"};
-function clsOf(type,cat){ const s=String(type||"").toLowerCase(); if(!s) return tabInfo(cat).def;
-  if(s==="mf"||s==="elss"||s.includes("mutual")) return "Mutual Funds"; if(s.startsWith("us")||s==="stocks"||s==="equity"||s==="stock") return "Stocks";
-  if(s.startsWith("bond")) return "Bonds"; if(s==="nps") return "NPS"; return tabInfo(cat).def; }
-const homeOf=a=>a==="NPS"?"Others":a;
-const PSLOT=["Groww","Wint Wealth","Stable Money","Grip Invest","INDmoney","Protean eNPS"];
+/* ---------- model: one Ledger. Every entry = date · whose money · account · asset · type · name · qty · price · amount ---------- */
 const WHOS=["Aditya","Spardha"], WHOC={Aditya:"#5B8CFF",Spardha:"#E86CC8"};
-function holdTab(who,plat,asset){ if(who==="Spardha") return SPO; if(asset==="Stocks") return /spardha/i.test(plat)?PIKUL:MAIN; return /spardha/i.test(plat)?PIKUL:"Mutual Funds"; }
-const holdPlat=tab=>tab===PIKUL?"Groww · "+SPA:"Groww";
-const keyName=s=>String(s).toLowerCase().replace(/[^a-z0-9 ]/g," ").split(/\s+/).filter(w=>w&&!/^(fund|direct|growth|plan|regular|option|the|idcw|ltd|limited)$/.test(w)).slice(0,3).join(" ");
-
+const ACCT0=["Groww · Aditya","Groww · Spardha","Wint · Aditya","Wint · Spardha","Grip · Aditya","Grip · Spardha","Stable Money · Aditya","Stable Money · Spardha","INDmoney · Aditya","INDmoney · Spardha","NPS · Aditya"];
+const prettyAcct=a=>/ · /.test(a||"")?String(a).replace(" · "," (")+")":String(a||""), holderOf=a=>/spardha/i.test(a)?"Spardha":"Aditya", platOf=a=>String(a||"").split(" · ")[0];
+const keyName=s=>String(s).toLowerCase().replace(/[^a-z0-9 ]/g," ").split(/\s+/).filter(w=>w&&!/^(fund|direct|growth|plan|regular|option|the|idcw|ltd|limited)$/.test(w)).slice(0,4).join(" ");
+const nkey=s=>String(s||"").toUpperCase().replace(/[^A-Z0-9]+/g," ").trim();
+/* which home group an entry belongs to */
+function homeOfRow(asset){ return asset==="Mutual Funds"?"Mutual Funds":asset==="Bonds"||asset==="FD"?"Bonds":asset==="NPS"?"Others":asset==="Insurance"?"Term":"Stocks"; }
+const OUTT=new Set(["Withdraw","Sell","Redeem","Payout","Charges"]);
 let DATA=store.get("cache",null), CACHE_AT=store.get("cacheAt",0), OUT=store.get("outbox",[]), SNZ=store.get("snz",{});
 let M=null, WHO=store.get("who","all"); if(!["all","Aditya","Spardha"].includes(WHO)) WHO="all";
 const saveOut=()=>store.set("outbox",OUT);
-const SCHED_RE=/\s*\[Repay ([^\]]*)\]/, DUE_RE=/\s*\[due (\d{4}-\d{2}-\d{2})\]/, TDS_RE=/\s*\[tds ([\d.]+)\]/, NET_RE=/\s*\[net ([\d.]+)\]/, TRADE_RE=/\s*\[Trade ([BS]) ([\d.]+)(?: @ ([\d.]+))?\]/, UNITS_RE=/\s*\[units ([\d.]+)\]/;
-function parseSched(note){ const m=SCHED_RE.exec(note||""); if(!m) return null;
-  const L=m[1].split("|").map(x=>x.trim().split(":")).filter(x=>/^\d{4}-\d{2}-\d{2}$/.test(x[0])).map(x=>({d:x[0],a:Number(x[1])||0})); return L.length?L:null; }
-const cleanNote=n=>String(n||"").replace(SCHED_RE,"").replace(DUE_RE,"").replace(TDS_RE,"").replace(NET_RE,"").replace(TRADE_RE,"").replace(UNITS_RE,"").trim();
+const DUE_RE=/\s*\[due (\d{4}-\d{2}-\d{2})\]/, TDS_RE=/\s*\[tds ([\d.]+)\]/, NET_RE=/\s*\[net ([\d.]+)\]/, PR_RE=/\s*\[p ([\d.]+)\]/;
+const cleanNote=n=>String(n||"").replace(DUE_RE,"").replace(TDS_RE,"").replace(NET_RE,"").replace(PR_RE,"").trim();
 
-/* records (insurance, bond schedules, labels, inbox) — server copy + changes waiting to sync */
+/* records (insurance, bond schedules, inbox) — server copy + changes waiting to sync */
 function recMap(){ const R=new Map(); ((DATA&&DATA.rec)||[]).forEach(r=>R.set(r[0],{id:r[0],kind:r[1],d:r[2]||{}}));
   OUT.filter(o=>o.kind==="rec").forEach(o=>o.ops.forEach(op=>{ if(op.del) R.delete(op.id); else R.set(op.id,{id:op.id,kind:op.kind,d:op.data,pending:1}); })); return R; }
 const recs=kind=>[...M.rec.values()].filter(r=>r.kind===kind);
 
 function build(){
-  const D=DATA||{cats:[],tx:[],vals:[],hold:[],rec:[]};
-  let tx=D.tx.map(r=>({cat:r[0],date:r[1],amt:r[2],type:r[3],plat:r[4],name:r[5],note:r[6],row:r[7],bid:r[8],mat:r[9],exp:r[10]}));
-  let vals=D.vals.map(r=>({cat:r[0],date:r[1],value:r[2],note:r[3],row:r[4]}));
-  let base=(D.hold||[]).map(r=>({date:r[0],who:r[1],plat:r[2],asset:r[3],name:r[4],isin:r[5],qty:r[6],avg:r[7],inv:r[8],cur:r[9],row:r[10]}));
-  for(const o of OUT){ const p=o.p; if(!p) continue;
-    if(o.kind==="add") tx.push({cat:p.cat,date:p.date,amt:p.kind==="out"?-p.amount:p.amount,type:p.type||(D.cats.find(c=>c.name===p.cat)||{}).def||"",plat:p.plat||"",name:p.name||"",note:p.note||"",row:0,bid:p.bid||"",mat:p.mat||"",exp:+p.exp||0,pending:1});
-    else if(o.kind==="value"){ vals=vals.filter(v=>!(v.cat===p.cat&&v.date===p.date)); vals.push({cat:p.cat,date:p.date,value:p.value,note:"",row:0,pending:1}); } }
-  const today=TODAY(), rec=recMap();
-  tx.forEach((t,i)=>{ const ti=tabInfo(t.cat); t.i=i; t.a=clsOf(t.type,t.cat); t.h=homeOf(t.a); t.who=ti.inv; t.acct=ti.acct;
-    t.p0=t.plat||(ti.plat&&t.a==="Stocks"?ti.plat:""); t.p=t.p0?(ti.acct?t.p0+" · "+ti.acct:t.p0):(ti.acct||"Not recorded");
-    t.sched=parseSched(t.note); t.due=(DUE_RE.exec(t.note||"")||[])[1]||""; t.tds=+((TDS_RE.exec(t.note||"")||[])[1]||0); t.net=+((NET_RE.exec(t.note||"")||[])[1]||0);
-    const tr=TRADE_RE.exec(t.note||""); if(tr) t.trade={side:tr[1],qty:+tr[2],price:+(tr[3]||0)||Math.abs(t.amt)/(+tr[2]||1)};
-    t.units=+((UNITS_RE.exec(t.note||"")||[])[1]||0); t.note2=cleanNote(t.note); });
-  /* holdings = the Groww snapshot + every trade / fund order recorded in Artha after it */
-  base.forEach(h=>{ h.tab=holdTab(h.who,h.plat,h.asset); h.a=h.asset==="Stocks"?"Stocks":"Mutual Funds"; });
-  const snap={}; base.forEach(h=>{ const k=h.tab+"|"+h.a; if(!snap[k]||h.date>snap[k]) snap[k]=h.date; });
-  const hold=base.map(h=>({...h})), find=(tab,a,name)=>hold.find(h=>h.tab===tab&&h.a===a&&keyName(h.name)===keyName(name));
-  tx.filter(t=>(t.a==="Stocks"||t.a==="Mutual Funds")&&t.date&&t.name&&snap[t.cat+"|"+t.a]&&t.date>snap[t.cat+"|"+t.a]&&(t.a!=="Stocks"||t.trade))
-    .sort((a,b)=>a.date<b.date?-1:1).forEach(t=>{
-      let h=find(t.cat,t.a,t.name); const tab=t.cat, ti=tabInfo(tab);
-      if(!h){ if(t.amt<=0) return; h={date:t.date,who:ti.inv,plat:holdPlat(tab),asset:t.a,a:t.a,tab,name:t.name,isin:"",qty:0,avg:0,inv:0,cur:0,row:0,derived:1}; hold.push(h); }
-      const q=t.trade?t.trade.qty:t.units||0, px=t.trade?t.trade.price:(q?Math.abs(t.amt)/q:0);
-      if(t.amt>0){ h.inv+=t.amt; h.qty+=q; h.cur=q&&h.qty&&px&&t.a==="Stocks"?h.qty*px:h.cur+t.amt; }
-      else { const out=-t.amt, frac=h.qty&&q?Math.min(1,q/h.qty):(h.cur?Math.min(1,out/h.cur):1);
-        h.inv-=h.inv*frac; h.qty=Math.max(0,h.qty-q); h.cur=t.a==="Stocks"&&px&&h.qty?h.qty*px:Math.max(0,h.cur-out); }
-      h.avg=h.qty?h.inv/h.qty:0; h.upd=t.date; h.moved=1; });
-  for(let i=hold.length-1;i>=0;i--) if(hold[i].cur<1&&hold[i].qty<1e-6) hold.splice(i,1);
+  const D=(DATA&&DATA.v===3)?DATA:{led:[],rec:[]}, today=TODAY(), rec=recMap();
+  let rows=D.led.map(r=>({id:r[0],date:r[1],who:r[2]||"Aditya",acct:r[3],asset:r[4],type:r[5],name:r[6],code:r[7],qty:+r[8]||0,price:+r[9]||0,amount:+r[10]||0,via:r[11],note:r[12],row:r[13]}));
+  const dels=new Set(), edits=new Map();
+  OUT.forEach(o=>{ if(o.kind==="add") o.rows.forEach((p,k)=>rows.push({id:"new-"+o.rid+"-"+k,date:p.date,who:p.who,acct:p.acct,asset:p.asset,type:p.type,name:p.name||"",code:p.code||"",qty:+p.qty||0,price:+p.price||0,amount:+p.amt||0,via:p.via||"",note:p.note||"",row:0,pending:1}));
+    else if(o.kind==="del") dels.add(o.id); else if(o.kind==="edit") edits.set(o.id,o.row); });
+  rows=rows.filter(r=>!dels.has(r.id)).map(r=>{ const e=edits.get(r.id); return e?Object.assign({},r,{date:e.date,who:e.who,acct:e.acct,asset:e.asset,type:e.type,name:e.name||"",code:e.code||"",qty:+e.qty||0,price:+e.price||0,amount:+e.amt||0,via:e.via||"",note:e.note||"",pending:1}):r; });
+  rows.sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:0);
+  /* entries as the screens see them. amt = money into (+) or out of (−) that investment from the bank; show = what the entry itself moved */
+  const tx=[], units=new Map(), U=(acct,who,h)=>{ const k=acct+"|"+who+"|"+h; if(!units.has(k)) units.set(k,{tab:k,acct,who,h,a:h,T:[],inv:0,out:0,net:0,cur:0,cash:0,valued:false,gain:null,x:null,flows:null,asof:"",src:"",V:[]}); return units.get(k); };
+  const push=(r,h,amt,extra)=>{ const t=Object.assign({i:tx.length,id:r.id,cat:r.acct+"|"+r.who+"|"+h,date:r.date,who:r.who,acct:r.acct,p:prettyAcct(r.acct),p0:platOf(r.acct),a:h,h,type:r.type,asset:r.asset,name:r.name,code:r.code,qty:r.qty,price:r.price,show:r.amount,amt,via:r.via,
+      note:r.note,note2:cleanNote(r.note),row:r.row,pending:r.pending,src:r},extra||{});
+    if((r.asset==="Stocks"||r.asset==="US Stocks")&&(r.type==="Buy"||r.type==="Sell")&&r.qty) t.trade={side:r.type==="Buy"?"B":"S",qty:r.qty,price:r.price||(r.qty?r.amount/r.qty:0)};
+    if(r.asset==="Mutual Funds"&&r.qty) t.units=r.qty;
+    t.due=(DUE_RE.exec(r.note||"")||[])[1]||""; t.tds=+((TDS_RE.exec(r.note||"")||[])[1]||0); t.net=+((NET_RE.exec(r.note||"")||[])[1]||0); t.pr=+((PR_RE.exec(r.note||"")||[])[1]||0);
+    tx.push(t); const u=U(r.acct,r.who,h); u.T.push(t); return t; };
+  const term=[];
+  rows.forEach(r=>{ const h=homeOfRow(r.asset), A=r.amount;
+    if(r.type==="Value"){ const u=U(r.acct,r.who,h); u.V.push(r); return; }
+    if(h==="Term"){ term.push(push(r,"Term",A)); return; }
+    let f=0;
+    if(r.type==="Add money") f=A; else if(r.type==="Withdraw") f=-A;
+    else if(r.type==="Buy"){ if(r.via==="Bank") f=A; else if(r.via==="Balance"&&h!=="Stocks"){ f=A; push(r,"Stocks",-A,{internal:1,show:A,name:r.name,type:"Moved"}); } }
+    else if(r.type==="Redeem"||r.type==="Sell"){ if(h!=="Stocks"&&r.via!=="Switch"){ f=-A; if(r.via==="Balance") push(r,"Stocks",A,{internal:1,show:A,type:"Moved in"}); } }
+    else if(r.type==="Payout") f=-A;
+    else if(r.type==="Premium") f=0;
+    push(r,h,f);
+    /* cash left in a broker account (Groww balance, INDmoney wallet) */
+    if(r.via==="Balance"||r.asset==="Cash"||r.asset==="F&O"){ const u=U(r.acct,r.who,"Stocks"), s={"Add money":1,"Sell":1,"Redeem":1,"Dividend":1,"Other income":1,"F&O result":1,"Withdraw":-1,"Buy":-1,"Charges":-1}[r.type]||0; u.cash+=s*A; }
+  });
+  /* holdings: quantity from buys, sells and bonuses; price from the latest valuation or trade */
+  const hm=new Map();
+  rows.filter(r=>r.asset==="Stocks"||r.asset==="US Stocks"||r.asset==="Mutual Funds").forEach(r=>{
+    const k=r.acct+"|"+r.who+"|"+r.asset+"|"+(r.asset==="Mutual Funds"?keyName(r.name):nkey(r.name)); let h=hm.get(k);
+    if(!h){ h={key:k,who:r.who,acct:r.acct,plat:r.acct,asset:r.asset,a:homeOfRow(r.asset),tab:r.acct+"|"+r.who+"|"+homeOfRow(r.asset),name:r.name,isin:r.code,qty:0,inv:0,px:0,pxd:"",date:r.date,upd:r.date,us:r.asset==="US Stocks"}; hm.set(k,h); }
+    if(r.type==="Value"){ if(r.price&&r.date>=h.pxd){ h.px=r.price; h.pxd=r.date; } return; }
+    if(r.type==="Buy"){ h.qty+=r.qty; h.inv+=r.amount; if(r.qty&&r.date>=h.pxd){ h.px=r.amount/r.qty; h.pxd=r.date; } }
+    else if(r.type==="Bonus") h.qty+=r.qty;
+    else if(r.type==="Sell"||r.type==="Redeem"){ const q=r.qty||(h.px?r.amount/h.px:0), fr=h.qty>0?Math.min(1,q/h.qty):1; h.inv-=h.inv*fr; h.qty=Math.max(0,h.qty-q); if(r.qty&&r.date>=h.pxd){ h.px=r.amount/r.qty; h.pxd=r.date; } }
+    else return;
+    h.upd=r.date; if(r.name&&r.name.length>h.name.length&&r.asset!=="Mutual Funds") h.name=r.name; if(r.code) h.isin=r.code; });
+  const hold=[...hm.values()].filter(h=>h.qty>1e-6).map(h=>Object.assign(h,{cur:h.qty*h.px,avg:h.qty?h.inv/h.qty:0,date:h.pxd||h.upd,moved:h.upd>h.pxd}));
   ["Stocks","Mutual Funds"].forEach(a=>hold.filter(h=>h.a===a).sort((x,y)=>y.cur-x.cur).forEach((h,k)=>h.col=AVC[k%AVC.length]));
   hold.forEach((h,i)=>{ h.i=i; h.gain=h.cur-h.inv; });
-  /* bonds with repayment schedules (principal + interest from Claude's reading when available) */
-  const B=new Map(), bk=t=>t.cat+"|"+(t.name||t.bid||"Bond");
-  tx.filter(t=>t.a==="Bonds"&&t.amt>0).forEach(t=>{ let b=B.get(bk(t)); if(!b){ b={key:bk(t),cat:t.cat,name:t.name||t.bid||"Bond",who:t.who,plat:t.p0,platL:t.p,rows:[],reps:[],cost:0,date:t.date}; B.set(b.key,b); }
-    b.rows.push(t); b.cost+=t.amt; if(t.date&&(!b.date||t.date<b.date)) b.date=t.date; });
-  tx.filter(t=>t.a==="Bonds"&&t.amt<0).forEach(t=>{ const b=B.get(bk(t)); if(b) b.reps.push(t); });
+  /* bonds and FDs: buys + payouts in the ledger, schedule in Records */
+  const B=new Map(), bk=t=>t.acct+"|"+t.name;
+  tx.filter(t=>t.a==="Bonds"&&t.type==="Buy").forEach(t=>{ let b=B.get(bk(t)); if(!b){ b={key:bk(t),cat:t.cat,acct:t.acct,name:t.name||"Bond",who:t.who,plat:t.p0,platL:prettyAcct(t.acct),fd:t.asset==="FD",rows:[],reps:[],cost:0,date:t.date}; B.set(b.key,b); }
+    b.rows.push(t); b.cost+=t.show; if(t.date<b.date) b.date=t.date; });
+  tx.filter(t=>t.a==="Bonds"&&t.type==="Payout").forEach(t=>{ const b=B.get(bk(t)); if(b) b.reps.push(t); });
   for(const b of B.values()){
-    const R=rec.get("bond:"+b.key); b.info=R?R.d:null;
-    let S;
-    if(R&&R.d.sched&&R.d.sched.length) S=R.d.sched.map(e=>({d:e.d,p:+e.p||0,i:+e.i||0,a:(+e.p||0)+(+e.i||0)})).sort((x,y)=>x.d<y.d?-1:1);
-    else { const m=new Map(); b.rows.forEach(t=>{ (t.sched||(t.mat?[{d:t.mat,a:t.exp||0}]:[])).forEach(e=>m.set(e.d,(m.get(e.d)||0)+(e.a||0))); });
-      S=[...m.entries()].sort((x,y)=>x[0]<y[0]?-1:1).map(([d,a])=>({d,a})); const ex=SUM(S,e=>e.a);
-      S.forEach(e=>{ e.p=ex>0?b.cost*e.a/ex:0; e.i=Math.max(0,e.a-e.p); e.est=1; }); }
+    const R=rec.get("bond:"+b.key); b.info=R?R.d:{};
+    let S=(b.info.sched||[]).map(e=>({d:e.d,p:+e.p||0,i:+e.i||0,a:(+e.p||0)+(+e.i||0),tds:+e.tds||0})).sort((x,y)=>x.d<y.d?-1:1);
     const dset=new Set(S.map(e=>e.d)); let untok=0; const tok=new Map(); b.reps.forEach(r=>{ if(r.due&&dset.has(r.due)) tok.set(r.due,r); else untok++; });
     S.forEach(e=>{ if(tok.has(e.d)){ e.done=true; e.row=tok.get(e.d); } else if(untok>0){ untok--; e.done=true; } });
-    b.sched=S; b.repaid=-SUM(b.reps,r=>r.amt); b.tds=SUM(b.reps,r=>r.tds); b.open=S.filter(e=>!e.done); b.closed=S.length?b.open.length===0:b.reps.length>0;
-    b.next=b.open[0]||null; b.exp=SUM(S,e=>e.a||0); b.mat=S.length?S[S.length-1].d:""; b.note=b.rows.map(r=>r.note2).filter(Boolean).join(" · ");
-    b.egain=b.exp?b.exp-b.cost:null; }
+    b.sched=S; b.repaid=SUM(b.reps,r=>r.show); b.tds=SUM(b.reps,r=>r.tds); b.prin=SUM(b.reps,r=>r.pr); b.open=S.filter(e=>!e.done);
+    b.closed=S.length?b.open.length===0:b.reps.length>0; b.next=b.open[0]||null; b.exp=SUM(S,e=>e.a||0); b.mat=S.length?S[S.length-1].d:"";
+    b.note=b.rows.map(r=>r.note2).filter(Boolean).join(" · "); b.egain=b.exp?b.exp-b.cost:null;
+    b.left=b.closed?0:Math.max(0,b.cost-(b.prin||0)); }
   const bonds=[...B.values()];
-  const tabs=D.cats.map(c=>{ const ti=tabInfo(c.name), T=tx.filter(t=>t.cat===c.name), V=vals.filter(v=>v.cat===c.name).sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:a.row-b.row), lv=V[V.length-1]||null;
-    return {...c,...ti,T,V,lv}; });
-  const units=[];
-  for(const c of tabs){ if(c.protect) continue;
-    const g=new Map(); c.T.forEach(t=>{ if(!g.has(t.a)) g.set(t.a,[]); g.get(t.a).push(t); });
-    const us=[...g.entries()].map(([a,T])=>{ const inv=SUM(T.filter(t=>t.amt>0),t=>t.amt), out=-SUM(T.filter(t=>t.amt<0),t=>t.amt);
-      return {tab:c.name,who:c.inv,acct:c.acct,a,h:homeOf(a),T,inv,out,net:inv-out,cur:0,valued:false,gain:null,x:null,flows:null,asof:"",src:""}; });
-    const bout=SUM(bonds.filter(b=>b.cat===c.name&&!b.closed),b=>b.cost), cost=u=>u.a==="Bonds"?bout:Math.max(0,u.net);
-    us.forEach(u=>u.cur=cost(u));
-    /* value today = last known value + money added or taken out since (carried forward until a new value arrives) */
-    const setVal=(u,date,val,src)=>{ const up=u.T.filter(t=>t.date&&t.date<=date), since=SUM(u.T.filter(t=>t.date&&t.date>date),t=>t.amt);
-      u.valued=true; u.asof=date; u.src=src; u.netAt=SUM(up,t=>t.amt); u.valAt=val; u.since=since; u.cur=Math.max(0,val+since); u.gain=u.cur-u.net;
-      u.flows=u.T.filter(t=>t.date).map(t=>[t.date,-t.amt]).concat([[today,u.cur]]); u.x=xirr(u.flows); };
-    if(c.lv&&us.length){ const prim=us.length===1?us[0]:(us.find(u=>u.a==="Stocks")||us.slice().sort((x,y)=>y.net-x.net)[0]), oc=SUM(us.filter(u=>u!==prim),cost);
-      setVal(prim,c.lv.date,c.lv.value-oc,"value"); }
-    us.forEach(u=>{ if(u.a!=="Stocks"&&u.a!=="Mutual Funds") return; const H=base.filter(h=>h.tab===c.name&&h.a===u.a); if(!H.length) return;
-      const hd=H.map(h=>h.date).sort().pop(); if(u.valued&&u.asof>hd) return; setVal(u,hd,SUM(H,h=>h.cur),"holdings"); });
-    units.push(...us);
+  /* each unit = account + whose money + group. value = holdings + cash (brokers), principal still out (bonds), or last value + money since (NPS) */
+  for(const u of units.values()){
+    u.T.forEach(t=>{ if(t.amt>0) u.inv+=t.amt; else u.out-=t.amt; }); u.net=u.inv-u.out;
+    if(u.h==="Stocks"||u.h==="Mutual Funds"){ const H=hold.filter(x=>x.tab===u.tab); u.cur=SUM(H,x=>x.cur)+(u.h==="Stocks"?Math.max(0,u.cash):0);
+      if(H.length||u.cash){ u.valued=true; u.src="holdings"; u.asof=H.map(x=>x.date).sort().pop()||today; } }
+    else if(u.h==="Bonds") u.cur=SUM(bonds.filter(b=>b.cat===u.tab&&!b.closed),b=>b.left);
+    else { u.cur=Math.max(0,u.net); const lv=u.V[u.V.length-1]; if(lv){ const since=SUM(u.T.filter(t=>t.date>lv.date),t=>t.amt); u.cur=Math.max(0,lv.amount+since); u.valued=true; u.asof=lv.date; u.src="value"; u.lv=lv; } }
+    if(u.valued){ u.gain=u.cur-u.net; u.flows=u.T.filter(t=>t.date&&t.amt).map(t=>[t.date,-t.amt]).concat([[today,u.cur]]); u.x=xirr(u.flows); }
   }
-  M={tabs,units,tx,vals,hold,bonds,today,rec,url:D.url||"",files:D.files||"",term:tabs.find(c=>c.protect)||null,v2:Array.isArray(D.rec)};
+  const ul=[...units.values()].filter(u=>u.h!=="Term"&&(u.T.length||u.V.length));
+  const accts=[...new Set(ACCT0.concat(rows.map(r=>r.acct)).filter(a=>a&&a!=="Insurance"))];
+  M={units:ul,tx,hold,bonds,today,rec,accts,url:D.url||"",gid:D.gid||0,files:D.files||"",term:term.length?{name:"Term plan",T:term}:null,v3:D===DATA,rows};
 }
+
 const okWho=(w,who)=>!who||who==="all"||w===who;
 function agg(h,who){
   const U=M.units.filter(u=>u.h===h&&okWho(u.who,who));
@@ -330,9 +325,14 @@ function bondRow(b){ const pr=b.exp>0?Math.min(1,b.repaid/b.exp):(b.closed?1:0),
   return `<button class="brow" data-bond="${esc(b.key)}"><div class="a"><span class="n">${esc(b.name)}</span><span class="v num">${money(b.cost,true)}</span></div>
     <div class="m"><span>${esc(b.platL)}${WHO==="all"?" · "+b.who:""}</span><span>${b.closed?`<span class="tag ok">Repaid</span>`:due?`<span class="tag due">Due ${fmtDs(b.next.d)}</span>`:b.next?"Next "+fmtDs(b.next.d)+(b.next.a?" · "+money(b.next.a,true):""):"No date"}</span></div>
     <div class="prog"><i style="width:${(pr*100).toFixed(1)}%;background:${b.closed?"var(--ok)":CLS.Bonds.col};box-shadow:0 0 10px ${b.closed?"var(--ok)":CLS.Bonds.col}"></i></div></button>`; }
-function txRow(t,k){ const c=CLS[t.a]||CLS.Stocks;
-  const title=t.a==="Term"?"Premium paid":t.trade?`${t.trade.side==="B"?"Bought":"Sold"} ${t.name}`:t.name?t.name:t.a==="Stocks"?(t.amt>0?"Money added to Groww":"Money taken out"):t.a==="NPS"?(t.amt>0?"Contribution":"Withdrawal"):(t.amt<0&&t.note2?t.note2:c.label);
-  return `<button class="tx" data-tx="${t.i}" style="--k:${Math.min(k||0,12)}"><span class="n">${esc(title)}</span><span class="amt num ${t.amt<0?"loss":""}">${money(t.amt)}</span>
+const TXT={"Add money":"Money added","Withdraw":"Money taken out","Buy":"Bought","Sell":"Sold","Bonus":"Bonus / split shares","Redeem":"Redeemed","Payout":"Money back","Dividend":"Dividend","Other income":"Other income","Charges":"Charges","F&O result":"F&O result","Premium":"Premium paid","Moved":"Paid from balance","Moved in":"Back to balance"};
+function txTitle(t){ if(t.type==="Premium") return "Term premium"; if(t.type==="Add money"||t.type==="Withdraw") return t.a==="Others"?(t.type==="Add money"?"NPS contribution":"NPS withdrawal"):TXT[t.type]+" · "+t.p0;
+  if(t.type==="Moved") return "Paid for "+(t.name||"a fund"); if(t.type==="Moved in") return "Back to balance · "+(t.name||"");
+  if(t.type==="F&O result") return t.show<0?"F&O loss":"F&O profit"; if(t.type==="Charges") return t.note2||"Charges";
+  return (TXT[t.type]||t.type)+(t.name?" "+t.name:""); }
+const txNeg=t=>OUTT.has(t.type)||t.type==="Moved"||(t.type==="F&O result"&&t.show<0);
+function txRow(t,k){ const neg=txNeg(t), v=Math.abs(t.show);
+  return `<button class="tx" data-tx="${t.i}" style="--k:${Math.min(k||0,12)}"><span class="n">${esc(txTitle(t))}</span><span class="amt num ${neg?"loss":""}">${t.type==="Bonus"?"+"+qtyf(t.qty):(neg?"−":"")+money(v)}</span>
     <span class="m"><span>${[fmtDs(t.date),WHO==="all"?t.who:"",t.p,t.trade?qtyf(t.trade.qty)+" @ "+rs(t.trade.price,false):""].filter(Boolean).map(esc).join(" · ")}</span>${t.pending?`<span class="chip sync">Syncing…</span>`:""}</span></button>`; }
 function bindRows(el){
   el.querySelectorAll("[data-hold]").forEach(b=>b.onclick=()=>holdSheet(M.hold[+b.dataset.hold]));
@@ -390,7 +390,7 @@ function bindScr(B){ const dk=$("scrDock");
   bindRows(B); tiltAll(B); }
 function doAct(a,el){
   const h=SC&&SC.h, inv=WHO==="all"?null:WHO;
-  if(a==="add") openAdd("in",{a:h==="NPS"?"NPS":h,inv:h==="NPS"?"Aditya":inv});
+  if(a==="add") openAdd("in",h==="NPS"?{type:"nps",inv:"Aditya"}:{a:h,inv});
   else if(a==="npsval") openValues("NPS");
   else if(a==="vals") openValues(h);
   else if(a==="bell") openBell();
@@ -398,7 +398,7 @@ function doAct(a,el){
   else if(a==="pol-doc") policyUpload(SC.id,"doc");
   else if(a==="pol-read") policyRead(SC.id,el&&el.dataset.term);
   else if(a==="pol-edit") editPolicy(SC.id,el&&el.dataset.term);
-  else if(a==="term-prem") openAdd("in",{cat:TERM});
+  else if(a==="term-prem") openAdd("in",{type:"term",inv:"Aditya"});
 }
 /* 3D tilt on the summary cards */
 function tiltAll(root){ root.querySelectorAll(".tilt").forEach(el=>{ if(el._t) return; el._t=1;
@@ -439,11 +439,7 @@ function payoutList(){ const L=[]; bondsFor(WHO).forEach(b=>b.open.forEach(e=>L.
     return `<button class="hl" style="--k:${Math.min(k,12)}" ${due?`data-pr="${esc(b.key)}|${e.d}"`:`data-bond="${esc(b.key)}"`}><span class="av" style="background:${due?"var(--accent)":CLS.Bonds.col};color:#1a1000">${dOf(e.d).getDate()}</span><div style="min-width:0"><div class="n">${esc(b.name)}</div><div class="m">${fmtD(e.d)}${e.i?" · interest "+rs(e.i,true)+(e.est?" (est.)":""):""}${due?" · tap to confirm":""}</div></div><div class="r"><b class="num">${e.a?money(e.a,true):"—"}</b><small>${due?`<span class="tag due">Due</span>`:"expected"}</small></div></button>`; }).join("")||`<div class="empty">Nothing to come.</div>`}</div>`; }
 
 /* ---------- charts ---------- */
-function unitHist(u){ const c=M.tabs.find(t=>t.name===u.tab); if(!c) return [];
-  const us=M.units.filter(x=>x.tab===u.tab), prim=us.length===1?us[0]:(us.find(x=>x.a==="Stocks")||us.slice().sort((x,y)=>y.net-x.net)[0]);
-  const H=[]; if(u===prim){ const oc=SUM(us.filter(x=>x!==u),x=>x.a==="Bonds"?0:Math.max(0,x.net)); c.V.forEach(v=>H.push({d:v.date,v:v.value-oc})); }
-  if(u.src==="holdings") H.push({d:u.asof,v:u.valAt});
-  return H.sort((a,b)=>a.d<b.d?-1:1); }
+function unitHist(u){ const m=new Map(); (u.V||[]).forEach(v=>m.set(v.date,(m.get(v.date)||0)+v.amount)); return [...m.entries()].map(([d,v])=>({d,v})).sort((a,b)=>a.d<b.d?-1:1); }
 function series(U){
   const T=[].concat(...U.map(u=>u.T)).filter(t=>t.date).sort((a,b)=>a.date<b.date?-1:1);
   const inv=[]; let c=0; T.forEach(t=>{ c+=t.amt; if(inv.length&&inv[inv.length-1].d===t.date) inv[inv.length-1].v=c; else inv.push({d:t.date,v:c}); });
@@ -542,19 +538,22 @@ function holdSheet(h){ if(!h) return; const isMF=h.a==="Mutual Funds", all=holdF
     ${dl([["Gain",`<span class="${cls(h.gain)}">${smoney(h.gain)}${gp!=null?" ("+pct(gp)+")":""}</span>`],["Invested",money(h.inv,false)],[isMF?"Units":"Quantity",h.qty?qtyf(h.qty):"—"],!isMF&&h.avg?["Average buy price",money(h.avg,false)]:null,
       !isMF&&h.qty?["Last price",money(h.cur/h.qty,false)]:null,isMF&&h.qty?["NAV (last known)",HIDE?"••":"₹"+(h.cur/h.qty).toFixed(2)]:null,["Investor",esc(h.who)],["Platform",esc(h.plat)],
       share!=null?["Share of all "+(isMF?"funds":"stocks"),pctp(share)]:null,h.isin?["ISIN",esc(h.isin)]:null,["As of",fmtD(h.upd||h.date)]])}
-    ${orders.length?`<div class="gh"><span>Your entries · ${orders.length}</span><b class="num">${money(SUM(orders,t=>t.amt),true)}</b></div><div class="list">${orders.slice().sort((a,b)=>a.date<b.date?1:-1).map(txRow).join("")}</div>`:""}
+    ${orders.length?`<div class="gh"><span>Your entries · ${orders.length}</span><b class="num">${money(SUM(orders,t=>t.type==="Buy"?t.show:t.type==="Sell"||t.type==="Redeem"?-t.show:0),true)}</b></div><div class="list">${orders.slice().sort((a,b)=>a.date<b.date?1:-1).map(txRow).join("")}</div>`:""}
     <div class="btns"><button class="x" type="button" id="hSell">${isMF?"Redeem":"Sell"}</button><button class="go" type="button" id="hBuy">${isMF?"Invest more":"Buy more"}</button></div>${closeBtn}`);
-  const pre={a:h.a,inv:h.who,cat:h.tab,name:h.name}; $("hBuy").onclick=()=>{ ov.back(); setTimeout(()=>openAdd("in",pre),80); }; $("hSell").onclick=()=>{ ov.back(); setTimeout(()=>openAdd("out",pre),80); }; }
+  const pre={a:h.a,inv:h.who,acct:h.acct,name:h.name,type:h.us?"us":h.a==="Mutual Funds"?"mf":"stocks"}; $("hBuy").onclick=()=>{ ov.back(); setTimeout(()=>openAdd("in",pre),80); }; $("hSell").onclick=()=>{ ov.back(); setTimeout(()=>openAdd("out",pre),80); }; }
 function fundSheet(id){ const f=fundsFromOrders("all").find(x=>x.id===id); if(!f) return;
   openE(`<div class="eamt num" style="color:var(--ink)">${money(f.net,false)}</div><div class="t">${esc(f.name)}</div>
     ${dl([["Investor",esc(f.who)],["Platform",esc([...new Set(f.T.map(t=>t.p))].join(", "))],["Orders",String(f.n)],["First order",fmtD(first(f.T))]])}
     <div class="list">${f.T.slice().sort((a,b)=>a.date<b.date?1:-1).map(txRow).join("")}</div>${closeBtn}`); }
-function txSheet(t){ if(!t) return; const g=(M.tabs.find(x=>x.name===t.cat)||{}).gid, link=M.url&&t.row?`${M.url}#gid=${g!=null?g:0}&range=A${t.row}`:"";
-  const what=t.trade?(t.trade.side==="B"?"Bought":"Sold"):t.amt<0?(t.a==="Bonds"?"Money back from a bond":"Taken out"):t.a==="Bonds"?"Bond bought":t.a==="Term"?"Premium paid":t.a==="Stocks"&&!t.name?"Money added to the Groww stock balance":t.a==="NPS"?"NPS contribution":"Invested";
-  openE(`<div class="eamt num" style="color:${t.amt<0?"var(--spend)":"var(--ink)"}">${money(t.amt,false)}</div><div class="t">${esc(what)}</div>
-    ${dl([["Date",fmtD(t.date)],["Investor",esc(t.who)],["Platform",esc(t.p)],t.name?[t.a==="Bonds"?"Bond":"Name",esc(t.name)]:null,t.trade?["Quantity",qtyf(t.trade.qty)]:null,t.trade?["Price",money(t.trade.price,false)]:null,t.units?["Units",qtyf(t.units)]:null,
-      ["Type",esc(t.type||CLS[t.a].label)],t.bid?["Bond ID",esc(t.bid)]:null,t.tds?["TDS (10% of interest)",money(t.tds,false)]:null,t.net?["Reached the bank",money(t.net,false)]:null,t.mat?["Ends",fmtD(t.mat)]:null,t.exp?["Expected back",money(t.exp,false)]:null,t.note2?["Note",esc(t.note2)]:null])}
-    <div class="s">${t.pending?"Waiting to sync":link?`<a href="${esc(link)}" target="_blank" rel="noopener">Edit in the sheet</a>`:""}</div>${closeBtn}`); }
+function txSheet(t){ if(!t) return; const r=t.src||{}, link=M.url&&t.row?`${M.url}#gid=${M.gid}&range=A${t.row}`:"", neg=txNeg(t);
+  openE(`<div class="eamt num" style="color:${neg?"var(--spend)":"var(--ink)"}">${t.type==="Bonus"?"+"+qtyf(t.qty)+" shares":money(Math.abs(t.show),false)}</div><div class="t">${esc(txTitle(t))}</div>
+    ${dl([["Date",fmtD(t.date)],["Whose money",esc(t.who)],["Account",esc(t.acct)],t.name?["Name",esc(t.name)]:null,t.qty?[t.asset==="Mutual Funds"?"Units":"Quantity",qtyf(t.qty)]:null,t.price?["Price",money(t.price,false)]:null,
+      ["Type",esc(t.type)],t.via?["Paid via",esc(t.via==="Balance"?"Account balance":t.via)]:null,t.tds?["TDS deducted",money(t.tds,false)]:null,t.pr?["Principal part",money(t.pr,false)]:null,t.net?["Reached the bank",money(t.net,false)]:null,t.note2?["Note",esc(t.note2)]:null,t.id&&!t.pending?["Entry",esc(t.id)]:null])}
+    <div class="s">${t.pending?"Waiting to sync":link?`<a href="${esc(link)}" target="_blank" rel="noopener">Open in the sheet</a>`:""}</div>
+    ${t.internal?"":`<div class="btns"><button class="x" type="button" id="tDel">Delete entry</button></div>`}${closeBtn}`);
+  const del=$("tDel"); if(del) del.onclick=()=>confirmSheet("Delete this entry?",`${txTitle(t)} · ${fmtD(t.date)}. It is removed from the Ledger in your sheet.`,"Delete",()=>{
+    if(String(t.id).startsWith("new-")){ const rid0=String(t.id).slice(4).replace(/-\d+$/,""); OUT=OUT.filter(o=>!(o.kind==="add"&&o.rid===rid0)); }
+    else OUT.push({kind:"del",id:t.id,rid:rid()}); saveOut(); refresh(); showToast("Entry deleted"); flush(); }); }
 function periodSheet(label,p){ openE(`<div class="eamt num" style="color:var(--ink)">${money(p.inn-p.out,false)}</div><div class="t">Net put in · ${esc(label)}</div>
     ${dl([["Put in",money(p.inn,false)],["Taken out",p.out?`<span class="loss">${money(-p.out,false)}</span>`:"—"],["Entries",String(p.T.length)]])}
     <div class="list">${p.T.slice().sort((a,b)=>a.date<b.date?1:-1).map(txRow).join("")||`<div class="empty">Nothing in this period.</div>`}</div>${closeBtn}`); }
@@ -565,14 +564,14 @@ function bondSheet(key){ const b=M.bonds.find(x=>x.key===key); if(!b) return; co
   const sch=b.sched.map(e=>{ const snz=(SNZ[b.key+"|"+e.d]||"")>today, due=!e.done&&e.d<=today&&!snz, amt=e.done&&e.row?-e.row.amt:e.a;
     return `<button class="hl" ${!e.done?`data-pr="${esc(b.key)}|${e.d}"`:""}><span class="av" style="background:${e.done?"var(--ok)":due?"var(--accent)":CLS.Bonds.col};color:#111">${dOf(e.d).getDate()}</span><div style="min-width:0"><div class="n">${fmtD(e.d)}</div><div class="m">${e.done?"Received"+(e.row&&e.row.tds?" · TDS "+rs(e.row.tds,false):""):snz?"Snoozed to "+fmtDs(SNZ[b.key+"|"+e.d]):due?"Tap to confirm":"Principal "+rs(e.p||0,true)+" · interest "+rs(e.i||0,true)+(e.est?" (est.)":"")}</div></div><div class="r"><b class="num">${amt?money(amt,true):"—"}</b><small>${e.done?`<span class="tag ok">Done</span>`:due?`<span class="tag due">Due</span>`:""}</small></div></button>`; }).join("");
   openE(`<div class="eamt num" style="color:var(--ink)">${money(b.cost,false)}</div><div class="t">${esc(b.name)}</div>
-    ${dl([["Status",b.closed?"Repaid":b.next?(b.next.d<=today?"Repayment due":"Active"):"Active"],["Investor",esc(b.who)],["Platform",esc(b.platL)],["Bought",fmtD(b.date)],info.rate?["Rate",esc(info.rate)]:null,b.exp?["Expected back (before TDS)",money(b.exp,false)]:null,["Received so far",money(b.repaid,false)],
+    ${dl([["Status",b.closed?"Repaid":b.next?(b.next.d<=today?"Repayment due":"Active"):"Active"],["Investor",esc(b.who)],["Platform",esc(b.platL)],["Bought",fmtD(b.date)],info.ytm||info.rate?["Yield",esc(info.ytm?info.ytm+"% a year":info.rate)]:null,b.exp?["Expected back (before TDS)",money(b.exp,false)]:null,["Received so far",money(b.repaid,false)],
       b.tds?["TDS deducted so far",money(b.tds,false)]:null,gain==null?null:[b.closed?"Gain":"Expected gain",`<span class="${cls(gain)}">${smoney(gain)}</span>`],b.mat?["Ends",fmtD(b.mat)]:null,b.note?["Note",esc(b.note)]:null,info.src?["Schedule from",esc(info.src)]:null])}
     ${sch?`<div class="gh"><span>Repayment dates</span><b class="num">${b.sched.filter(e=>e.done).length}/${b.sched.length}</b></div><div class="list">${sch}</div>`:""}
     ${b.closed?"":`<button class="x" type="button" id="bCalT">${svgI("cal","var(--neon)",15)} ${info.remind==="cal"?"Google Calendar alerts are on · turn off":"Add Google Calendar alerts for these dates"}</button>`}
     <div class="btns"><button class="x" type="button" id="bShot">Read dates from screenshots</button><button class="go" type="button" id="bRec">Record repayment</button></div>${closeBtn}`);
   const ct=$("bCalT"); if(ct) ct.onclick=()=>{ ov.back(); setBondRemind(b,info.remind!=="cal"); };
   $("bRec").onclick=()=>openPrompt(b,b.next||{d:today,a:0,p:0,i:0},true);
-  $("bShot").onclick=()=>pickFiles("image/*,application/pdf",files=>sendInbox("bond",{bondKey:b.key,name:b.name,cat:b.cat,who:b.who,platform:b.plat,amount:b.cost,date:b.date,existing:true},files,"Schedule for "+b.name)); }
+  $("bShot").onclick=()=>pickFiles("image/*,application/pdf",files=>sendInbox("bond",{bondKey:b.key,name:b.name,acct:b.acct,who:b.who,platform:b.plat,amount:b.cost,date:b.date,existing:true},files,"Schedule for "+b.name)); }
 function openGain(){ const R=HOME.map(h=>agg(h,WHO)).filter(r=>r.U.length);
   openE(`<div class="eamt num" style="color:var(--ink)">${smoney(SUM(R.filter(r=>r.gain!=null),r=>r.gain))}</div><div class="t">Returns${WHO!=="all"?" · "+WHO:""}</div>
     <div class="list">${R.map(r=>{ const gp=r.gain!=null&&r.base>0?r.gain/r.base:null; return `<button class="hl" data-cat="${r.h}"><span class="av" style="background:${CLS[r.h].col}">${svgI(CLS[r.h].icon,"#fff",18)}</span><div style="min-width:0"><div class="n">${CLS[r.h].label}</div><div class="m">XIRR ${pct(r.x)}${r.asof?" · value "+fmtDs(r.asof):""}</div></div><div class="r"><b class="num ${cls(r.gain)}">${r.gain==null?"—":smoney(r.gain,true)}</b><small>${pct(gp)}</small></div></button>`; }).join("")}</div>
@@ -616,8 +615,8 @@ function openPrompt(b,e,manual){ const today=M.today, sp=splitOf(b,e), expNet=Ma
   const sg=$("snzGo"); if(sg) sg.onclick=()=>{ const n=Number($("snzN").value); if(n>0) snooze(n); else $("rErr").textContent="Type the number of days."; };
   $("rOk").onclick=()=>{ const net=numIn($("rAmt").value), P=numIn($("rP").value), dt=$("rDate").value;
     if(!(net>0)){ $("rErr").textContent="Enter the amount that reached your bank."; return; } if(!dt||dt>today){ $("rErr").textContent="Pick the date it came in."; return; }
-    const r=tdsFor(net,P), c=M.tabs.find(k=>k.name===b.cat)||{fields:[]};
-    OUT.push({kind:"add",p:{cat:b.cat,kind:"out",date:dt,amount:r.gross,type:(c.fields||[]).includes("type")?"Bond":"",plat:b.plat||"",name:b.name,note:`Repayment received${manual?"":" [due "+e.d+"]"}${r.tds?" [tds "+r.tds+"]":""} [net ${net}]`,bid:"",mat:"",exp:"",rid:rid()}});
+    const r=tdsFor(net,P);
+    OUT.push({kind:"add",rows:[{date:dt,who:b.who,acct:b.acct,asset:b.fd?"FD":"Bonds",type:"Payout",name:b.name,amt:r.gross,via:"Bank",note:`Received${manual?"":" [due "+e.d+"]"} [p ${Math.round(P*100)/100}]${r.tds?" [tds "+r.tds+"]":""} [net ${net}]`}],rid:rid()});
     if(!manual) OUT.push({kind:"cal",ops:[{key:"rp:"+b.key+"|"+e.d,del:true}]});
     saveOut(); ov.back(); refresh(); showToast(`${rs(r.gross,false)} recorded for ${b.name}${r.tds?" (incl. "+rs(r.tds,false)+" TDS)":""}`); flush(); }; }
 
@@ -635,24 +634,23 @@ function polCal(pid,title,end,on){ if(!end) return []; const d=addDays(end,-15)<
   return [on?{key:"ins:"+pid,title:`Renew insurance: ${title}`,date:d,desc:`${title} ends on ${fmtD(end)}.`}:{key:"ins:"+pid,del:true}]; }
 
 /* ---------- values ---------- */
-function npsValue(){ const c=M.tabs.find(t=>t.name==="NPS"); if(!c) return; const r=agg("Others","Aditya");
-  openE(`<div class="t big">NPS value today</div><div class="s" style="text-align:left">Invested ${money(r.net,false)}${c.lv?` · last value ${money(c.lv.value,false)} on ${fmtD(c.lv.date)}`:""}</div>
-    <label class="fld"><span>Current value (₹)</span><input id="nV" inputmode="numeric" autocomplete="off" placeholder="₹"></label>
-    <label class="fld"><span>As of</span><input id="nD" type="date" value="${M.today}" max="${M.today}"></label><div class="err" id="nErr"></div>
-    <button class="go" type="button" id="nOk">Save value</button>${closeBtn}`);
-  const i=$("nV"); i.oninput=()=>{ const raw=i.value.replace(/[^\d]/g,"").slice(0,11); i.value=raw?Number(raw).toLocaleString("en-IN"):""; }; setTimeout(()=>i.focus(),120);
-  $("nOk").onclick=()=>{ const v=Number(i.value.replace(/[^\d]/g,"")), d=$("nD").value; if(!(v>0)){ $("nErr").textContent="Type the value."; return; }
-    OUT.push({kind:"value",p:{cat:"NPS",date:d,value:v,rid:rid()}}); saveOut(); ov.back(); refresh(); showToast("NPS value saved"); flush(); }; }
-const VLBL={[MAIN]:["Stocks","Aditya's own Groww","Stocks"],[PIKUL]:["Stocks and bonds","Aditya's money in Spardha's account","Stocks"],"Mutual Funds":["Mutual funds","Aditya","Mutual Funds"],"Bonds":["Bonds","Aditya","Bonds"],[SPO]:["Mutual funds","Spardha's own","Mutual Funds"],"NPS":["NPS","Aditya · not in totals","NPS"]};
-function openValues(h){ const rows=M.tabs.filter(c=>!c.protect&&(c.T.length||c.lv)&&(!h||c.T.some(t=>t.h===h||(h==="NPS"&&t.a==="NPS")))), vals={};
-  openE(`<div class="t big">Update today's values</div><div class="s" style="text-align:left">Open Groww, Wint or the NPS app and type what each one is worth today. Leave a box empty to keep the last value.</div>
-    <div class="vcards">${rows.map((c,k)=>{ const [t,sub,cl]=VLBL[c.name]||[c.name,"","Stocks"], col=CLS[cl].col;
-      return `<label class="vcard" style="--c:${col};--k:${k}"><span class="av" style="background:${col}">${svgI(CLS[cl].icon,"#fff",18)}</span><span class="vt"><b>${esc(t)}</b><small>${esc(sub)}</small><small class="num">${c.lv?`Last ${money(c.lv.value,true)} · ${fmtDs(c.lv.date)}`:"No value yet"}</small></span><span class="vin"><i>₹</i><input inputmode="numeric" data-vc="${esc(c.name)}" placeholder="Today"></span></label>`; }).join("")}</div>
+function npsValue(){ openValues("NPS"); }
+function unitLabel(u){ return [u.h==="Others"?"NPS":CLS[u.h].label, u.acct+(holderOf(u.acct)!==u.who?" · "+u.who+"'s money":"")]; }
+function openValues(h){ const key=h==="NPS"?"Others":h, U=M.units.filter(u=>u.h!=="Bonds"&&(!key||u.h===key)&&(u.cur>0||u.V.length)).sort((a,b)=>b.cur-a.cur), vals={};
+  openE(`<div class="t big">Update today's values</div><div class="s" style="text-align:left">Open the app for each account and type what it shows as the current value. Leave a box empty to keep the last value.</div>
+    <div class="vcards">${U.map((u,k)=>{ const [t,sub]=unitLabel(u), cl=u.h==="Others"?"NPS":u.h, col=CLS[cl].col;
+      return `<label class="vcard" style="--c:${col};--k:${k}"><span class="av" style="background:${col}">${svgI(CLS[cl].icon,"#fff",18)}</span><span class="vt"><b>${esc(t)}</b><small>${esc(sub)}</small><small class="num">${u.valued?`Now ${money(u.cur,true)} · ${fmtDs(u.asof)}`:"No value yet"}</small></span><span class="vin"><i>₹</i><input inputmode="numeric" data-vc="${esc(u.tab)}" placeholder="Today"></span></label>`; }).join("")||`<div class="empty">Nothing to value here.</div>`}</div>
     <div class="err" id="vErr"></div><button class="go" type="button" id="vOk">Save values</button>${closeBtn}`);
   $("eBox").querySelectorAll("[data-vc]").forEach(i=>i.oninput=()=>{ const raw=i.value.replace(/[^\d]/g,"").slice(0,11); vals[i.dataset.vc]=raw; i.value=raw?Number(raw).toLocaleString("en-IN"):""; });
   $("vOk").onclick=()=>{ const L2=Object.entries(vals).filter(([,v])=>v); if(!L2.length){ $("vErr").textContent="Type at least one value."; return; }
-    L2.forEach(([cat,v])=>OUT.push({kind:"value",p:{cat,date:M.today,value:Number(v),rid:rid()}})); saveOut(); ov.back(); refresh(); showToast(`Saved ${L2.length} value${L2.length>1?"s":""}`); flush(); }; }
-
+    const rows=[];
+    L2.forEach(([tab,v])=>{ const u=M.units.find(x=>x.tab===tab); if(!u) return; v=Number(v);
+      const H=M.hold.filter(x=>x.tab===tab);
+      if(H.length){ const tot=SUM(H,x=>x.cur)||1, k=Math.max(0,v-Math.max(0,u.cash||0))/tot;
+        H.forEach(x=>rows.push({date:M.today,who:u.who,acct:u.acct,asset:x.asset,type:"Value",name:x.name,code:x.isin||"",qty:Math.round(x.qty*10000)/10000,price:Math.round(x.px*k*100)/100,amt:Math.round(x.cur*k*100)/100,note:"From the account total you typed"})); }
+      else { const t=u.T[0]||{}; rows.push({date:M.today,who:u.who,acct:u.acct,asset:t.asset||"NPS",type:"Value",name:t.name||"Value",amt:v,note:"Value typed in Artha"}); } });
+    for(let i=0;i<rows.length;i+=40) OUT.push({kind:"add",rows:rows.slice(i,i+40),rid:rid()});
+    saveOut(); ov.back(); refresh(); showToast(`Saved ${L2.length} value${L2.length>1?"s":""}`); flush(); }; }
 /* ---------- files → Drive, and the Claude inbox ---------- */
 function pickFiles(accept,cb,multi){ const fi=$("fileIn"); fi.accept=accept; fi.multiple=multi!==false; fi.value=""; fi.onchange=()=>{ const F=[...fi.files]; if(F.length) cb(F); }; fi.click(); }
 function fileB64(f){ return new Promise((ok,bad)=>{
@@ -662,7 +660,7 @@ function fileB64(f){ return new Promise((ok,bad)=>{
   else read(f); }); }
 const extOf=(f,mime)=>{ const m=/\.(\w{2,5})$/.exec(f.name||""); return m?m[1].toLowerCase():/pdf/.test(mime)?"pdf":/png/.test(mime)?"png":"jpg"; };
 async function uploadFiles(files,path,nameFn){ if(!navigator.onLine) throw new Error("You're offline. Uploads need the internet.");
-  if(!M.v2) throw new Error("Update the Artha backend first (paste the new Code.gs and redeploy).");
+  if(!M.v3) throw new Error("Update the Artha backend first (paste the new Code.gs and redeploy).");
   const out=[]; for(let i=0;i<files.length;i++){ const f=files[i]; busy(`Uploading ${i+1} of ${files.length}…`); const {b64,mime}=await fileB64(f);
     const name=nameFn?nameFn(f,i,mime):(f.name||("file-"+(i+1)+"."+extOf(f,mime)));
     const r=await call("upload",{e:{name,mime,b64,path}}); out.push({id:r.file.id,name:r.file.name,url:r.file.url,mime:r.file.mime,size:r.file.size,at:M.today}); }
@@ -705,12 +703,11 @@ function reviewBond(r){ const d=r.d, x=d.res||{}, c=d.ctx||{}, S=(x.sched||[]).m
   $("bDel").onclick=()=>{ inboxDone(r.id,"removed"); ov.back(); refresh(); };
   $("bOk").onclick=()=>{ const name=$("bN").value.trim(), A=numIn($("bA").value), D=$("bD").value;
     if(!name){ $("bErr").textContent="Type the bond's name."; return; } if(!S.length){ $("bErr").textContent="There are no repayment dates to save."; return; }
-    const cat=c.cat||"Bonds", key=c.existing?c.bondKey:cat+"|"+name;
+    const acct=c.acct||c.cat||"Wint · Aditya", key=c.existing?c.bondKey:acct+"|"+name;
     if(!c.existing){ if(!(A>0)){ $("bErr").textContent="Type the amount invested."; return; }
-      const tcat=M.tabs.find(k=>k.name===cat)||{fields:[]};
-      OUT.push({kind:"add",p:{cat,kind:"in",date:D,amount:A,type:(tcat.fields||[]).includes("type")?"Bond":"",plat:x.platform||c.platform||"",name,bid:x.bondId||"",mat:S[S.length-1].d,exp:Math.round(P+I),note:("[Repay "+S.map(e=>e.d+":"+Math.round(e.p+e.i)).join(" | ")+"]"),rid:rid()}}); }
-    OUT.push({kind:"rec",ops:[{id:"bond:"+key,kind:"bond",title:name,data:{sched:S,rate:x.rate||"",bondId:x.bondId||"",src:"Claude · screenshots "+M.today,gain:Math.round(gain),remind:rem}}],rid:rid()});
-    if(rem==="cal") queueCal(bondCal(key,name,x.platform||c.platform||"",S.map(e=>({d:e.d,a:e.p+e.i}))));
+      OUT.push({kind:"add",rows:[{date:D,who:c.who||"Aditya",acct,asset:"Bonds",type:"Buy",name,code:x.bondId||"",amt:A,via:"Bank",note:x.rate?String(x.rate):""}],rid:rid()}); }
+    OUT.push({kind:"rec",ops:[{id:"bond:"+key,kind:"bond",title:name,data:{sched:S,rate:x.rate||"",bondId:x.bondId||"",acct,who:c.who||"Aditya",name,platform:platOf(acct),src:"Claude · screenshots "+M.today,gain:Math.round(gain),remind:rem}}],rid:rid()});
+    if(rem==="cal") queueCal(bondCal(key,name,acct,S.map(e=>({d:e.d,a:e.p+e.i}))));
     inboxDone(r.id); saveOut(); ov.back(); refresh(); flush(); showToast(`${name} saved with ${S.length} repayment dates`); }; }
 
 /* ---------- INSURANCE ---------- */
@@ -879,108 +876,144 @@ $("q").addEventListener("input",doSearch);
 $("closeSearch").onclick=()=>ov.back();
 $("searchBtn").onclick=openSearch;
 
-/* ---------- ADD: amount → what → details ---------- */
-const TYPES={Aditya:[["Stocks","stocks","Stocks"],["Mutual fund","mf","MF"],["Bond","bond","Bond"],["NPS","nps","NPS"],["ELSS","elss","ELSS"],["US stocks","us","US Stocks"],["Term premium","term","Term"]],
-  Spardha:[["Mutual fund","mf","MF"],["Stocks","stocks","Stocks"],["US stocks","us","US Stocks"]]};
-const TCOL={Stocks:CLS.Stocks.col,"US Stocks":CLS.Stocks.col,MF:CLS["Mutual Funds"].col,ELSS:CLS["Mutual Funds"].col,Bond:CLS.Bonds.col,NPS:CLS.NPS.col,Term:CLS.Term.col};
-const A={mode:"in",digits:"",date:"",who:"Aditya",pre:{},step:"pad",type:null,acct:"own",det:{}};
+/* ---------- ADD: amount → what → details. Writes plain Ledger rows. ---------- */
+const TYPES=[["stocks","Stocks","stocks","Stocks"],["mf","Mutual fund","mf","Mutual Funds"],["bond","Bond","bond","Bonds"],["fd","Fixed deposit","fd","FD"],
+  ["us","US stocks","us","US Stocks"],["cash","Money in / out","cash","Cash"],["nps","NPS","nps","NPS"],["term","Term premium","term","Insurance"]];
+const TCOL={stocks:CLS.Stocks.col,us:CLS.Stocks.col,cash:CLS.Stocks.col,mf:CLS["Mutual Funds"].col,bond:CLS.Bonds.col,fd:CLS.Bonds.col,nps:CLS.NPS.col,term:CLS.Term.col};
+const A={mode:"in",digits:"",date:"",who:"Aditya",pre:{},step:"pad",type:null,det:{}};
 const amtNum=()=>Number(A.digits||0);
-const clsOfType=t=>t==="MF"||t==="ELSS"?"Mutual Funds":t==="Bond"?"Bonds":t==="NPS"?"NPS":t==="Term"?"Term":"Stocks";
-function tabFor(who,type,acct){ if(who==="Spardha") return SPO; if(type==="Term") return TERM; if(type==="NPS") return "NPS";
-  if(type==="Bond") return acct==="sp"?PIKUL:"Bonds"; if(type==="MF"||type==="ELSS") return acct==="sp"&&type==="MF"?PIKUL:"Mutual Funds"; return acct==="sp"?PIKUL:MAIN; }
-function typesNow(){ let L2=TYPES[A.who].filter(t=>M.tabs.some(c=>c.name===tabFor(A.who,t[2],"own")));
-  if(A.mode==="out") L2=L2.filter(t=>t[2]!=="Term"); if(A.pre.cat===TERM) return L2.filter(t=>t[2]==="Term");
-  if(A.pre.a) L2=L2.filter(t=>clsOfType(t[2])===A.pre.a); return L2; }
-function openAdd(mode,pre){ A.mode=mode==="out"?"out":"in"; A.digits=""; A.date=TODAY(); A.pre=pre||{}; A.det={name:A.pre.name||undefined}; A.type=null; A.acct=A.pre.cat===PIKUL?"sp":"own";
-  A.who=A.pre.cat===TERM?"Aditya":A.pre.inv||(WHO!=="all"?WHO:"Aditya"); if(!typesNow().length) A.who="Aditya";
+const typeOf=id=>TYPES.find(t=>t[0]===id)||TYPES[0];
+const groupOfType=id=>homeOfRow(typeOf(id)[3]);
+function typesNow(){ let L2=TYPES.slice();
+  if(A.mode==="out") L2=L2.filter(t=>!["term","fd"].includes(t[0]));
+  if(A.pre.type) return L2.filter(t=>t[0]===A.pre.type);
+  if(A.pre.a) L2=L2.filter(t=>groupOfType(t[0])===A.pre.a||(A.pre.a==="Stocks"&&t[0]==="cash"));
+  return L2; }
+/* accounts that make sense for a type, most-used first */
+function acctsFor(type){ const fit={stocks:/groww|zerodha|upstox|angel|kite/i,us:/indmoney|vested|groww/i,cash:/groww|indmoney|zerodha|upstox/i,mf:/groww|kuvera|coin|zerodha/i,bond:/wint|grip|stable|golden|altifi|indmoney/i,fd:/bank|stable|fd|sbi|hdfc|icici|axis|kotak/i,nps:/nps/i,term:/insurance/i}[type]||/./;
+  const used=new Map(); M.tx.forEach(t=>{ if(t.acct) used.set(t.acct,(used.get(t.acct)||0)+1); });
+  const L2=M.accts.filter(a=>fit.test(a)); return L2.sort((x,y)=>(used.get(y)||0)-(used.get(x)||0)); }
+function openAdd(mode,pre){ A.mode=mode==="out"?"out":"in"; A.digits=""; A.date=TODAY(); A.pre=pre||{}; A.det={name:A.pre.name||undefined,acct:A.pre.acct}; A.type=null;
+  A.who=A.pre.inv||(WHO!=="all"?WHO:"Aditya");
   $("aErr").textContent=""; setStep("pad"); showAmt(); showDate(); paintMode(); paintWho();
   if(!isOpen($("addSheet"))) ov.open($("addSheet"),()=>{ vanish($("addSheet")); }); }
-function paintMode(){ $("aMode").querySelectorAll("button").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.m===A.mode))); $("aMode").hidden=A.pre.cat===TERM;
-  const c=A.pre.a?CLS[A.pre.a].label.toLowerCase():""; $("addTitle").textContent=A.pre.name?(A.mode==="out"?"Sell · ":"Buy · ")+A.pre.name:A.pre.cat===TERM?"Term premium":A.mode==="out"?(c?"Take out of "+c:"Withdraw or sell"):(c?"Add to "+c:"New investment"); }
-function paintWho(){ $("aWho").textContent=A.who; $("aWhoBtn").disabled=!!A.pre.inv||A.pre.cat===TERM; }
-function setStep(s){ A.step=s; $("aPad").hidden=s!=="pad"; $("aCats").hidden=s!=="cats"; $("aDet").hidden=s!=="det"; $("catHint").hidden=s!=="cats"; $("aPanel").hidden=s==="det"; $("aMode").hidden=s!=="pad"||A.pre.cat===TERM; }
+function paintMode(){ $("aMode").querySelectorAll("button").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.m===A.mode)));
+  const c=A.pre.a&&CLS[A.pre.a]?CLS[A.pre.a].label.toLowerCase():"";
+  $("addTitle").textContent=A.pre.name?(A.mode==="out"?"Sell · ":"Buy · ")+A.pre.name:A.pre.type==="term"?"Term premium":A.mode==="out"?(c?"Take out of "+c:"Withdraw or sell"):(c?"Add to "+c:"New entry"); }
+function paintWho(){ $("aWho").textContent=A.who; $("aWhoBtn").disabled=!!A.pre.inv||A.pre.type==="term"; }
+function setStep(s){ A.step=s; $("aPad").hidden=s!=="pad"; $("aCats").hidden=s!=="cats"; $("aDet").hidden=s!=="det"; $("catHint").hidden=s!=="cats"; $("aPanel").hidden=s==="det"; $("aMode").hidden=s!=="pad"||A.pre.type==="term"; }
 function showAmt(){ const n=amtNum(); $("aVal").textContent=n?n.toLocaleString("en-IN"):"0"; $("aVal").classList.toggle("long",String(n).length>8); }
 function showDate(){ $("aDate").value=A.date; $("aDateTxt").textContent=A.date===TODAY()?"Today":fmtD(A.date); }
 $("aDate").addEventListener("change",()=>{ A.date=$("aDate").value||TODAY(); showDate(); });
 $("aMode").querySelectorAll("button").forEach(b=>b.onclick=()=>{ A.mode=b.dataset.m; paintMode(); });
-$("aWhoBtn").onclick=()=>{ if($("aWhoBtn").disabled) return; A.who=A.who==="Aditya"?"Spardha":"Aditya"; if(!typesNow().length) A.who="Aditya"; paintWho(); if(A.step==="cats") drawCats(); };
+$("aWhoBtn").onclick=()=>{ if($("aWhoBtn").disabled) return; A.who=A.who==="Aditya"?"Spardha":"Aditya"; paintWho(); };
 $("aBack").onclick=()=>{ A.digits=A.digits.slice(0,-1); showAmt(); };
 $("aPad").querySelectorAll("[data-k]").forEach(b=>b.onclick=()=>{ const k=b.dataset.k; $("aErr").textContent=""; if(k==="back") A.digits=A.digits.slice(0,-1); else if(A.digits.length<11) A.digits=(A.digits+k).replace(/^0+/,""); showAmt(); if(navigator.vibrate) navigator.vibrate(6); });
 addEventListener("keydown",e=>{ if(!isOpen($("addSheet"))||A.step!=="pad"||/INPUT|TEXTAREA/.test(document.activeElement.tagName)) return;
   if(/^\d$/.test(e.key)){ A.digits=(A.digits+e.key).replace(/^0+/,"").slice(0,11); showAmt(); } else if(e.key==="Backspace"){ A.digits=A.digits.slice(0,-1); showAmt(); } else if(e.key==="Enter") $("aChoose").click(); });
-$("aChoose").onclick=()=>{ if(!amtNum()){ $("aErr").textContent="Enter the amount first."; return; } const L2=typesNow(); if(L2.length===1){ A.type=L2[0][2]; drawDet(); setStep("det"); } else { drawCats(); setStep("cats"); } };
+$("aChoose").onclick=()=>{ if(!amtNum()){ $("aErr").textContent="Enter the amount first."; return; } const L2=typesNow(); if(L2.length===1){ pickType(L2[0][0]); } else { drawCats(); setStep("cats"); } };
 $("closeAdd").onclick=()=>{ if(A.step==="det"){ const L2=typesNow(); if(L2.length>1){ drawCats(); setStep("cats"); } else setStep("pad"); } else if(A.step==="cats") setStep("pad"); else ov.back(); };
 function drawCats(){ const L2=typesNow();
-  $("aCats").innerHTML=L2.map(t=>`<button type="button" class="card" data-t="${t[2]}" style="color:${TCOL[t[2]]}">${svgI(t[1],TCOL[t[2]])}<span style="color:var(--ink)">${t[0]}</span></button>`).join("");
-  $("aCats").querySelectorAll("[data-t]").forEach(b=>b.onclick=()=>{ A.type=b.dataset.t; A.det={name:A.pre.name||undefined}; A.acct=A.pre.cat===PIKUL?"sp":store.get("acct:"+A.type,"own"); drawDet(); setStep("det"); }); }
+  $("aCats").innerHTML=L2.map(t=>`<button type="button" class="card" data-t="${t[0]}" style="color:${TCOL[t[0]]}">${svgI(t[2],TCOL[t[0]])}<span style="color:var(--ink)">${t[1]}</span></button>`).join("");
+  $("aCats").querySelectorAll("[data-t]").forEach(b=>b.onclick=()=>pickType(b.dataset.t)); }
+function pickType(t){ A.type=t; const keepAcct=A.pre.acct; A.det={name:A.pre.name||undefined,acct:keepAcct||store.get("acct:"+t,"")}; if(t==="term") A.who="Aditya"; drawDet(); setStep("det"); }
 function recentOf(f,filter){ const seen=[]; M.tx.filter(t=>t[f]&&(!filter||filter(t))).sort((a,b)=>(b.date||"")<(a.date||"")?-1:1).forEach(t=>{ if(!seen.includes(t[f])) seen.push(t[f]); }); return seen; }
+function fdSched(P,rate,start,end,pay){ const r=rate/100, S=[]; if(!(P>0&&r>0&&end>start)) return S;
+  if(pay==="end"){ const yrs=days(start,end)/365, amt=P*Math.pow(1+r/4,4*yrs); S.push({d:end,p:P,i:Math.round((amt-P)*100)/100}); return S; }
+  const step=pay==="m"?1:3; let d=addMonths(start,step), prev=start;
+  while(d<end){ S.push({d,p:0,i:Math.round(P*r*days(prev,d)/365*100)/100}); prev=d; d=addMonths(d,step); }
+  S.push({d:end,p:P,i:Math.round(P*r*days(prev,end)/365*100)/100}); return S; }
 function drawDet(){
-  const d=A.det, type=A.type, inv=A.mode==="in", canSp=A.who==="Aditya"&&["Stocks","US Stocks","MF","Bond"].includes(type)&&!A.pre.cat;
-  if(!canSp&&!A.pre.cat) A.acct="own"; const cat=A.pre.cat&&A.pre.cat!==TERM?A.pre.cat:tabFor(A.who,type,A.acct), c=M.tabs.find(x=>x.name===cat)||{fields:[]}, F=new Set(c.fields||[]);
-  const isBond=type==="Bond", term=type==="Term", nps=type==="NPS", stock=type==="Stocks"||type==="US Stocks", mf=type==="MF"||type==="ELSS", label=(TYPES[A.who].find(t=>t[2]===type)||["Investment"])[0];
-  const same=t=>t.cat===cat&&(!F.has("type")||clsOf(t.type,t.cat)===clsOf(type==="Term"?"":type,cat));
-  const used=recentOf("p0",same), plats=[...new Set(used.concat(nps?["Protean eNPS"]:PSLOT.filter(p=>p!=="Protean eNPS")))].slice(0,6);
-  if(d.plat==null) d.plat=used[0]||(nps?"Protean eNPS":tabInfo(cat).plat||"Groww"); if(d.plat&&!plats.includes(d.plat)) plats.unshift(d.plat);
-  const held=stock||mf?M.hold.filter(h=>h.tab===cat&&h.a===(stock?"Stocks":"Mutual Funds")).map(h=>h.name):[];
-  const names=[...new Set(held.concat(recentOf("name",same)))], nameL=isBond?"Bond name":mf?"Fund":"Stock";
-  if(!d.reps) d.reps=[{d:"",a:""}]; if(d.remind==null) d.remind=remindPref();
-  const keep=()=>{ const g=id=>$(id)?$(id).value:undefined; ["name","bid","note","qty","units"].forEach(k=>{ const v=g("d"+k[0].toUpperCase()+k.slice(1)); if(v!==undefined) d[k]=v; }); const o=g("dPlatO"); if(o!==undefined) d.plat=o.trim();
+  const d=A.det, type=A.type, inv=A.mode==="in", T=typeOf(type), label=T[1];
+  const isBond=type==="bond", fd=type==="fd", term=type==="term", nps=type==="nps", cash=type==="cash", stock=type==="stocks"||type==="us", mf=type==="mf";
+  const AC=acctsFor(type); if(term) d.acct="Insurance"; if(nps&&!d.acct) d.acct="NPS · "+A.who;
+  if(!d.acct) d.acct=AC.find(a=>holderOf(a)===A.who)||AC[0]||""; const showA=[...new Set([d.acct].concat(AC))].filter(Boolean).slice(0,8);
+  if(d.via==null) d.via=stock?"Balance":mf?"Bank":"Bank";
+  const held=stock||mf?M.hold.filter(h=>h.acct===d.acct&&h.asset===T[3]).map(h=>h.name):[];
+  const bondsHere=(isBond||fd)&&!inv?M.bonds.filter(b=>!b.closed&&b.acct===d.acct).map(b=>b.name):[];
+  const names=[...new Set(held.concat(bondsHere,recentOf("name",t=>t.acct===d.acct&&t.asset===T[3])))], nameL=isBond?"Bond name":fd?"Bank / FD name":mf?"Fund":"Stock";
+  if(!d.reps) d.reps=[{d:"",a:""}]; if(d.remind==null) d.remind=remindPref(); if(!d.fdPay) d.fdPay="end";
+  const keep=()=>{ const g=id=>$(id)?$(id).value:undefined; ["name","note","qty","rate","end"].forEach(k=>{ const v=g("d"+k[0].toUpperCase()+k.slice(1)); if(v!==undefined) d[k]=v; }); const o=g("dAcctO"); if(o!==undefined) d.acct=o.trim();
     const rr=[...document.querySelectorAll("#dReps .rr")]; if(rr.length) d.reps=rr.map(r=>({d:r.querySelector("input[type=date]").value,a:r.querySelector("input[inputmode]").value})); };
   const q=numIn(d.qty), px=q?amtNum()/q:0;
-  $("aDet").innerHTML=`<div class="sumline"><span><small style="display:block;color:var(--muted);font-size:12px">${A.who} · ${esc(label)} · ${A.date===TODAY()?"today":fmtD(A.date)}</small>${inv?(term?"Premium":stock?"Buying":"Investing"):stock?"Selling":"Taking out"}</span><b class="num">₹${amtNum().toLocaleString("en-IN")}</b></div>
-    ${canSp?`<div class="fld"><span>Which account</span><div class="seg sm" id="dAcct"><button type="button" data-v="own" aria-pressed="${A.acct==="own"}">Aditya's own</button><button type="button" data-v="sp" aria-pressed="${A.acct==="sp"}">${SPA}</button></div></div>`:""}
+  const verb=inv?(term?"Premium":stock?"Buying":cash?"Adding to account":"Investing"):stock?"Selling":isBond?"Money back":cash?"Taking out":"Taking out";
+  const viaSeg=stock?`<div class="fld"><span>${inv?"Paid from":"Money goes to"}</span><div class="seg sm" id="dVia"><button type="button" data-v="Balance" aria-pressed="${d.via==="Balance"}">${inv?"Account balance":"Stays in account"}</button><button type="button" data-v="Bank" aria-pressed="${d.via==="Bank"}">${inv?"Bank (adds the money too)":"My bank"}</button></div></div>`
+    :mf&&/groww/i.test(d.acct)?`<div class="fld"><span>${inv?"Paid from":"Money goes to"}</span><div class="seg sm" id="dVia"><button type="button" data-v="Bank" aria-pressed="${d.via==="Bank"}">My bank</button><button type="button" data-v="Balance" aria-pressed="${d.via==="Balance"}">Groww balance</button></div></div>`:"";
+  $("aDet").innerHTML=`<div class="sumline"><span><small style="display:block;color:var(--muted);font-size:12px">${esc(label)} · ${A.date===TODAY()?"today":fmtD(A.date)}</small>${verb}</span><b class="num">₹${amtNum().toLocaleString("en-IN")}</b></div>
+    ${term?"":`<div class="fld"><span>Whose money</span><div class="seg sm" id="dWho">${WHOS.map(w=>`<button type="button" data-v="${w}" aria-pressed="${A.who===w}">${w}</button>`).join("")}</div></div>`}
+    ${term?"":`<div class="fld"><span>Account</span><div class="seg sm wrap" id="dAcct">${showA.map(a=>`<button type="button" data-v="${esc(a)}" aria-pressed="${!d.acctOther&&a===d.acct}">${esc(a)}</button>`).join("")}<button type="button" data-v="__o" aria-pressed="${!!d.acctOther}">New account</button></div>${d.acctOther?`<input id="dAcctO" value="${esc(d.acct||"")}" maxlength="50" placeholder="e.g. HDFC Bank · Spardha">`:""}${d.acct&&holderOf(d.acct)!==A.who&&!nps?`<small class="hint" style="display:block;margin-top:6px">${esc(A.who)}'s money in ${esc(holderOf(d.acct))}'s account — tracked as ${esc(A.who)}'s.</small>`:""}</div>`}
     ${isBond&&inv?`<button class="ai" id="dShot" type="button">${svgI("spark","var(--neon2)")}<span><b>Fill from screenshots</b><small>Upload the platform's screenshots; Claude reads the name, repayment dates, principal and interest</small></span></button>`:""}
-    ${!term&&F.has("plat")?`<div class="fld"><span>Platform</span><div class="seg sm" id="dPlat">${plats.map(p=>`<button type="button" data-v="${esc(p)}" aria-pressed="${!d.platOther&&p===d.plat}">${esc(p)}</button>`).join("")}<button type="button" data-v="__o" aria-pressed="${!!d.platOther}">Other</button></div>${d.platOther?`<input id="dPlatO" value="${esc(d.plat||"")}" maxlength="40" placeholder="Platform name">`:""}</div>`:""}
-    ${!term&&F.has("name")?`<label class="fld"><span>${nameL}</span><input id="dName" list="dNames" value="${esc(d.name||"")}" maxlength="120" autocomplete="off"><datalist id="dNames">${names.map(n=>`<option value="${esc(n)}">`).join("")}</datalist></label>`:""}
+    ${!term&&!cash&&!nps?`<label class="fld"><span>${nameL}</span><input id="dName" list="dNames" value="${esc(d.name||"")}" maxlength="120" autocomplete="off"><datalist id="dNames">${names.map(n=>`<option value="${esc(n)}">`).join("")}</datalist></label>`:""}
     ${stock?`<label class="fld"><span>Quantity (shares)</span><input id="dQty" inputmode="decimal" value="${esc(d.qty||"")}" autocomplete="off"></label><div class="calc" id="dPx">${q?`<div><span>Price per share</span><b>${esc(rs(px,false))}</b></div>`:"<div><span>Amount is the total, including charges. Quantity gives the price.</span></div>"}</div>`:""}
-    ${mf?`<label class="fld"><span>Units (optional, from the order confirmation)</span><input id="dUnits" inputmode="decimal" value="${esc(d.units||"")}" autocomplete="off"></label>`:""}
+    ${mf?`<label class="fld"><span>Units (optional, from the order confirmation)</span><input id="dQty" inputmode="decimal" value="${esc(d.qty||"")}" autocomplete="off"></label>`:""}
+    ${viaSeg}
+    ${fd?`<div class="btns"><label class="fld"><span>Interest rate (% a year)</span><input id="dRate" inputmode="decimal" value="${esc(d.rate||"")}"></label><label class="fld"><span>Matures on</span><input id="dEnd" type="date" value="${esc(d.end||"")}" min="${A.date}"></label></div>
+      <div class="fld"><span>Interest is paid</span><div class="seg sm" id="dFdPay"><button type="button" data-v="end" aria-pressed="${d.fdPay==="end"}">At maturity</button><button type="button" data-v="q" aria-pressed="${d.fdPay==="q"}">Every quarter</button><button type="button" data-v="m" aria-pressed="${d.fdPay==="m"}">Every month</button></div></div>
+      <div class="calc" id="dFdC"></div>${remindSeg("dRem",d.remind,"Remind me when money is due")}`:""}
     ${isBond&&inv?`<div class="fld"><span>Repayment dates · amount back each time (before TDS)</span><div id="dReps" style="display:grid;gap:8px">${d.reps.map((r,i)=>`<div class="rr"><input type="date" value="${esc(r.d)}" aria-label="Repayment date ${i+1}"><input inputmode="numeric" placeholder="₹ amount" value="${esc(r.a)}" aria-label="Amount ${i+1}"><button type="button" data-rm="${i}" aria-label="Remove">×</button></div>`).join("")}</div>${d.reps.length<60?`<button type="button" class="addr" id="dAddR">+ Add another date</button>`:""}</div>
-      ${remindSeg("dRem",d.remind,"Remind me on the repayment dates")}
-      ${F.has("bid")?`<label class="fld"><span>Bond ID (optional)</span><input id="dBid" value="${esc(d.bid||"")}" maxlength="40"></label>`:""}`:""}
-    ${F.has("note")?`<label class="fld"><span>${inv?"Note (optional)":"Reason (optional)"}</span><textarea id="dNote" rows="2" maxlength="250">${esc(d.note||"")}</textarea></label>`:""}
-    <div class="err" id="dErr" role="alert"></div><button type="button" class="btn1" id="dSave">${inv?(term?"Save premium":isBond?"Save bond":stock?"Save buy":"Save"):stock?"Save sale":"Save withdrawal"}</button>`;
-  const da=$("dAcct"); if(da) da.querySelectorAll("[data-v]").forEach(b=>b.onclick=()=>{ keep(); A.acct=b.dataset.v; store.set("acct:"+type,A.acct); d.plat=null; d.platOther=0; drawDet(); });
-  const dp=$("dPlat"); if(dp) dp.querySelectorAll("[data-v]").forEach(b=>b.onclick=()=>{ keep(); if(b.dataset.v==="__o"){ d.platOther=1; d.plat=""; drawDet(); setTimeout(()=>$("dPlatO")&&$("dPlatO").focus(),30); } else { d.platOther=0; d.plat=b.dataset.v; drawDet(); } });
-  const qi=$("dQty"); if(qi) qi.oninput=()=>{ const n=numIn(qi.value); $("dPx").innerHTML=n?`<div><span>Price per share</span><b>${esc(rs(amtNum()/n,false))}</b></div>`:"<div><span>Quantity gives the price per share.</span></div>"; };
+      ${remindSeg("dRem",d.remind,"Remind me on the repayment dates")}`:""}
+    <label class="fld"><span>${inv?"Note (optional)":"Reason (optional)"}</span><textarea id="dNote" rows="2" maxlength="250">${esc(d.note||"")}</textarea></label>
+    <div class="err" id="dErr" role="alert"></div><button type="button" class="btn1" id="dSave">${inv?(term?"Save premium":isBond?"Save bond":fd?"Save FD":stock?"Save buy":"Save"):stock?"Save sale":isBond?"Save payout":"Save withdrawal"}</button>`;
+  const seg=(id,fn)=>{ const el=$(id); if(el) el.querySelectorAll("[data-v]").forEach(b=>b.onclick=()=>{ keep(); fn(b.dataset.v); drawDet(); }); };
+  seg("dWho",v=>{ A.who=v; paintWho(); if(nps) d.acct="NPS · "+v; });
+  seg("dAcct",v=>{ if(v==="__o"){ d.acctOther=1; d.acct=""; setTimeout(()=>$("dAcctO")&&$("dAcctO").focus(),30); } else { d.acctOther=0; d.acct=v; } });
+  seg("dVia",v=>d.via=v); seg("dFdPay",v=>d.fdPay=v);
+  const qi=$("dQty"); if(qi&&stock) qi.oninput=()=>{ const n=numIn(qi.value); $("dPx").innerHTML=n?`<div><span>Price per share</span><b>${esc(rs(amtNum()/n,false))}</b></div>`:"<div><span>Quantity gives the price per share.</span></div>"; };
+  const fdc=()=>{ const el=$("dFdC"); if(!el) return; const S=fdSched(amtNum(),numIn($("dRate").value),A.date,$("dEnd").value,d.fdPay), I=SUM(S,e=>e.i);
+    el.innerHTML=S.length?`<div><span>${S.length} payment${S.length>1?"s":""} · interest before TDS</span><b>${esc(rs(I,false))}</b></div><div><span>Back at maturity</span><b>${esc(rs(S[S.length-1].p+S[S.length-1].i,false))}</b></div>`:"<div><span>Type the rate and the maturity date.</span></div>"; };
+  if(fd){ $("dRate").oninput=fdc; $("dEnd").onchange=fdc; fdc(); }
   const ar=$("dAddR"); if(ar) ar.onclick=()=>{ keep(); d.reps.push({d:"",a:""}); drawDet(); };
   document.querySelectorAll("#dReps [data-rm]").forEach(b=>b.onclick=()=>{ keep(); d.reps.splice(+b.dataset.rm,1); if(!d.reps.length) d.reps=[{d:"",a:""}]; drawDet(); });
-  const sh=$("dShot"); if(sh) sh.onclick=()=>{ keep(); pickFiles("image/*,application/pdf",files=>{ const amt=amtNum(), ctx={cat,who:A.who,platform:d.plat||"",amount:amt,date:A.date,name:(d.name||"").trim()};
+  const sh=$("dShot"); if(sh) sh.onclick=()=>{ keep(); pickFiles("image/*,application/pdf",files=>{ const amt=amtNum(), ctx={acct:d.acct,who:A.who,platform:platOf(d.acct),amount:amt,date:A.date,name:(d.name||"").trim()};
     ov.back(); setTimeout(()=>sendInbox("bond",ctx,files,`New bond · ${rs(amt,false)}${ctx.name?" · "+ctx.name:""}`),120); }); };
   bindRemind("dRem",v=>d.remind=v);
-  $("dSave").onclick=()=>{ keep(); saveEntry(cat,F); };
+  $("dSave").onclick=()=>{ keep(); saveEntry(); };
 }
-function saveEntry(cat,F){ const d=A.det, type=A.type, isBond=type==="Bond", term=type==="Term", stock=type==="Stocks"||type==="US Stocks", mf=type==="MF"||type==="ELSS"; let mat="",exp="",note=(d.note||"").trim(), R=[];
-  if(A.mode==="in"&&isBond){ R=(d.reps||[]).filter(r=>r.d).map(r=>({d:r.d,a:numIn(r.a)})).sort((x,y)=>x.d<y.d?-1:1);
-    if(!R.length){ $("dErr").textContent="Add at least one repayment date, or fill from screenshots."; return; } if(R.some(r=>r.d<=A.date)){ $("dErr").textContent="Repayment dates should be after the purchase date."; return; }
-    mat=R[R.length-1].d; exp=SUM(R,r=>r.a)||""; if(R.length>1) note=(note+" [Repay "+R.map(r=>r.d+":"+r.a).join(" | ")+"]").trim(); }
-  if(isBond&&!(d.name||"").trim()){ $("dErr").textContent="Type the bond's name."; return; }
-  if(stock){ const q=numIn(d.qty); if(!(d.name||"").trim()){ $("dErr").textContent="Type the stock's name."; return; } if(!(q>0)){ $("dErr").textContent="Type the number of shares."; return; }
-    note=(note+` [Trade ${A.mode==="out"?"S":"B"} ${q} @ ${(amtNum()/q).toFixed(2)}]`).trim(); }
-  if(mf&&numIn(d.units)>0) note=(note+` [units ${numIn(d.units)}]`).trim();
-  if(mf&&!(d.name||"").trim()){ $("dErr").textContent="Type the fund's name."; return; }
-  if(d.platOther&&!d.plat){ $("dErr").textContent="Type the platform name, or pick one."; return; }
-  const p={cat,kind:A.mode,date:A.date,amount:amtNum(),type:F.has("type")&&!term?(type==="Bond"?"Bond":type):"",plat:term?"":d.plat||"",name:term?"":(d.name||"").trim(),note,bid:isBond?(d.bid||"").trim():"",mat,exp,rid:rid()};
-  if(isBond&&A.mode==="in"&&d.remind==="cal"&&R.length){ queueCal(bondCal(cat+"|"+p.name,p.name,p.plat,R)); OUT.push({kind:"rec",ops:[{id:"bond:"+cat+"|"+p.name,kind:"bond",title:p.name,data:{remind:"cal"}}],rid:rid()}); } OUT.push({kind:"add",p}); saveOut(); ov.back(); refresh(); showToast(`${rs(p.amount,false)} saved`); flush(); }
+function saveEntry(){ const d=A.det, type=A.type, T=typeOf(type), inv=A.mode==="in", amt=amtNum(), name=(d.name||"").trim(), note=(d.note||"").trim(), err=m=>{ $("dErr").textContent=m; };
+  const acct=(d.acct||"").trim(); if(!acct) return err("Pick an account, or type a new one.");
+  const base={date:A.date,who:A.who,acct,asset:T[3],name,note,via:""}, rows=[]; let recOp=null, cal=[];
+  if(type==="stocks"||type==="us"){ const q=numIn(d.qty); if(!name) return err("Type the stock's name."); if(!(q>0)) return err("Type the number of shares.");
+    if(inv&&d.via==="Bank") rows.push({...base,asset:"Cash",type:"Add money",name:"",amt,via:"Bank",note:"Bank → "+acct});
+    rows.push({...base,type:inv?"Buy":"Sell",qty:q,price:Math.round(amt/q*100)/100,amt,via:"Balance"});
+    if(!inv&&d.via==="Bank") rows.push({...base,asset:"Cash",type:"Withdraw",name:"",amt,via:"Bank",note:acct+" → bank"}); }
+  else if(type==="mf"){ if(!name) return err("Type the fund's name."); const q=numIn(d.qty); rows.push({...base,type:inv?"Buy":"Redeem",qty:q||"",price:q?Math.round(amt/q*10000)/10000:"",amt,via:d.via||"Bank"}); }
+  else if(type==="cash") rows.push({...base,type:inv?"Add money":"Withdraw",amt,via:"Bank"});
+  else if(type==="nps") rows.push({...base,name:"NPS Tier I",type:inv?"Add money":"Withdraw",amt,via:"Bank"});
+  else if(type==="term") rows.push({...base,who:"Aditya",acct:"Insurance",name:"Term plan",type:"Premium",amt,via:"Bank"});
+  else if((type==="bond"||type==="fd")&&!inv){ if(!name) return err("Pick the bond."); rows.push({...base,type:"Payout",amt,via:"Bank",note:(note+" [p 0] [tds 0]").trim()}); }
+  else if(type==="bond"||type==="fd"){ if(!name) return err(type==="fd"?"Type the bank or FD name.":"Type the bond's name.");
+    let S;
+    if(type==="fd"){ const r=numIn(d.rate); if(!(r>0)) return err("Type the interest rate."); if(!d.end||d.end<=A.date) return err("Pick the maturity date."); S=fdSched(amt,r,A.date,d.end,d.fdPay); }
+    else { const R=(d.reps||[]).filter(r=>r.d).map(r=>({d:r.d,a:numIn(r.a)})).sort((x,y)=>x.d<y.d?-1:1);
+      if(!R.length) return err("Add at least one repayment date, or fill from screenshots."); if(R.some(r=>r.d<=A.date)) return err("Repayment dates should be after the purchase date.");
+      const ex=SUM(R,r=>r.a); S=R.map((r,k)=>({d:r.d,p:k===R.length-1?Math.min(amt,r.a):0,i:k===R.length-1?Math.max(0,r.a-amt):r.a})); if(ex<amt) S=R.map(r=>({d:r.d,p:ex?amt*r.a/ex:0,i:0})); }
+    rows.push({...base,type:"Buy",amt,via:"Bank",note:(note+(type==="fd"?` ${numIn(d.rate)}% · matures ${fmtD(d.end)}`:"")).trim()});
+    const key=acct+"|"+name; recOp={id:"bond:"+key,kind:"bond",title:name,data:{sched:S,remind:d.remind,acct,who:A.who,name,platform:platOf(acct),ytm:type==="fd"?numIn(d.rate):undefined,fd:type==="fd"?1:undefined}};
+    if(d.remind==="cal") cal=bondCal(key,name,acct,S.map(e=>({d:e.d,a:e.p+e.i}))); }
+  if(recOp) OUT.push({kind:"rec",ops:[recOp],rid:rid()}); if(cal.length) queueCal(cal);
+  store.set("acct:"+type,acct);
+  OUT.push({kind:"add",rows,rid:rid()}); saveOut(); ov.back(); refresh(); showToast(`${rs(amt,false)} saved`); flush(); }
 
 /* ---------- sync ---------- */
 let loading=false, flushing=false;
 function setSync(kind,txt){ $("syncLine").className=kind||""; $("syncTxt").textContent=txt; }
 const fmtWhen=t=>{ if(!t) return "never"; const m=Math.round((Date.now()-t)/6e4); return m<1?"just now":m<60?m+" min ago":m<1440?Math.round(m/60)+" h ago":new Date(t).toLocaleDateString("en-IN",{day:"numeric",month:"short"}); };
 const liveLine=()=>`Synced ${fmtWhen(CACHE_AT)}`+(OUT.length?` · ${OUT.length} waiting`:"");
-function applyData(d){ if(!d||!d.cats) return; DATA=d; CACHE_AT=Date.now(); store.set("cache",d); store.set("cacheAt",CACHE_AT); refresh(); setSync(OUT.length?"warn":"live",liveLine()); }
+function applyData(d){ if(!d) return; if(d.v!==3){ DATA=d; refresh(); setSync("warn","Paste the new Artha backend (v3) and run setupV3() to see your data"); return; } DATA=d; CACHE_AT=Date.now(); store.set("cache",d); store.set("cacheAt",CACHE_AT); refresh(); setSync(OUT.length?"warn":"live",liveLine()); }
 function errText(e){ const m=String(e&&e.message||e||"");
   if(/PASSCODE/.test(m)){ store.set("pass",""); askPass("Wrong passcode. 3 wrong tries lock Artha for 3 hours."); return "Passcode needed."; }
   if(/Locked/.test(m)){ if(!$("gate").hidden) $("gErr").textContent=m; return m; } return m||"Couldn't reach Google just now."; }
-const ACTION={add:"add",value:"value",rec:"rec",cal:"cal"};
+const ACTION={add:"add",edit:"edit",del:"del",rec:"rec",cal:"cal"};
 function flush(){ if(flushing||!PW()||!API()||!OUT.length) return;
-  const old=DATA&&!Array.isArray(DATA.rec), idx=OUT.findIndex(o=>!(old&&(o.kind==="rec"||o.kind==="cal")));
-  if(idx<0){ setSync("warn","Insurance and reminders wait on this phone until the Artha backend is updated"); return; }
-  const it=OUT[idx]; if(!ACTION[it.kind]){ OUT.splice(idx,1); saveOut(); flush(); return; }
+  if(DATA&&DATA.v!==3){ setSync("warn","Waiting for the Artha backend update · "+OUT.length+" saved on this phone"); return; }
+  const it=OUT[0]; if(!ACTION[it.kind]){ OUT.shift(); saveOut(); flush(); return; }
   flushing=true;
-  call(ACTION[it.kind],it.kind==="add"||it.kind==="value"?{e:it.p}:{e:{ops:it.ops,rid:it.rid}}).then(d=>{ flushing=false; OUT.splice(OUT.indexOf(it),1); saveOut(); applyData(d); flush(); },x=>{ flushing=false; const m=String(x&&x.message||x);
+  const e=it.kind==="add"?{rows:it.rows,rid:it.rid}:it.kind==="del"?{id:it.id,rid:it.rid}:it.kind==="edit"?{id:it.id,row:it.row,rid:it.rid}:{ops:it.ops,rid:it.rid};
+  call(ACTION[it.kind],{e}).then(d=>{ flushing=false; OUT.splice(OUT.indexOf(it),1); saveOut(); applyData(d); flush(); },x=>{ flushing=false; const m=String(x&&x.message||x);
     if(x&&x.net){ setSync("warn",`Offline · ${OUT.length} waiting to sync`); return; } if(/PASSCODE|Locked/.test(m)){ setSync("warn",errText(x)); return; }
     if(/Unknown action/i.test(m)){ setSync("warn","Waiting for the Artha backend update · "+OUT.length+" saved on this phone"); return; }
     OUT.splice(OUT.indexOf(it),1); saveOut(); refresh(); showToast(`Not saved: ${m}`,7000); flush(); }); }
+
 addEventListener("online",()=>{ flush(); pull(); });
 function pull(){ if(loading) return Promise.resolve(); if(!API()){ askPass(null,true); return Promise.resolve(); } if(!PW()){ askPass(); return Promise.resolve(); } flush(); loading=true;
   setSync("busy",DATA?`Synced ${fmtWhen(CACHE_AT)} · updating…`:"Loading your sheet…");
@@ -997,7 +1030,7 @@ let TAB_NOW=store.get("tab","inv"); if(!["inv","ins"].includes(TAB_NOW)) TAB_NOW
 function setTab(t){ TAB_NOW=t; store.set("tab",t); $("viewInv").hidden=t!=="inv"; $("viewIns").hidden=t!=="ins"; $("tabInv").setAttribute("aria-pressed",String(t==="inv")); $("tabIns").setAttribute("aria-pressed",String(t==="ins"));
   S3.theme(t==="ins"?"ins":"home"); if(t==="ins") renderIns(); else renderHome(); scrollTo({top:0}); }
 $("tabInv").onclick=()=>setTab("inv"); $("tabIns").onclick=()=>setTab("ins");
-$("addBtn").onclick=()=>{ if(SC&&isOpen($("scr"))&&SC.h==="pol") return policyUpload(SC.id,"renew"); if(TAB_NOW==="ins"&&!(SC&&isOpen($("scr")))) return addPolicy(); openAdd("in",SC&&isOpen($("scr"))&&SC.h!=="pol"?{a:SC.h==="NPS"?"NPS":SC.h}:{}); };
+$("addBtn").onclick=()=>{ if(SC&&isOpen($("scr"))&&SC.h==="pol") return policyUpload(SC.id,"renew"); if(TAB_NOW==="ins"&&!(SC&&isOpen($("scr")))) return addPolicy(); openAdd("in",SC&&isOpen($("scr"))&&SC.h!=="pol"?(SC.h==="NPS"?{type:"nps"}:{a:SC.h}):{}); };
 function upCheck(){ const inScr=isOpen($("scr")), y=inScr?$("scrBody").scrollTop:scrollY; $("upBtn").hidden=y<420; S3.scroll(y); }
 addEventListener("scroll",upCheck,{passive:true}); $("scrBody").addEventListener("scroll",upCheck,{passive:true});
 $("upBtn").onclick=()=>{ const sm=document.documentElement.classList.contains("calm")?"auto":"smooth"; if(isOpen($("scr"))) $("scrBody").scrollTo({top:0,behavior:sm}); else scrollTo({top:0,behavior:sm}); };

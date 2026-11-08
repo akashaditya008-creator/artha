@@ -451,3 +451,6 @@ main{padding:0 max(16px,env(safe-area-inset-left,0px));perspective:1200px}
 @keyframes rise{from{opacity:0;transform:translateY(8px)}}
 :root.calm #bg3d{display:none}
 :root.calm .fc{transition:none}
+/* v3: account chips wrap onto more lines */
+.seg.wrap{flex-wrap:wrap;overflow:visible}
+.seg.wrap button{flex:0 0 auto}
