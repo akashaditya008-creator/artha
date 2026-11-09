@@ -248,7 +248,9 @@ main{padding:0 max(16px,env(safe-area-inset-left,0px));perspective:1200px}
 .sect{margin-top:14px;padding:14px;border-radius:20px;background:var(--surface);border:1px solid var(--line)}
 .sect h5{margin:0 0 8px;font:600 11px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--c,var(--neon));display:flex;justify-content:space-between;align-items:center}
 .sect ul{margin:0;padding-left:18px;display:grid;gap:6px;font-size:13.5px;line-height:1.45}
-.sect ul.no li::marker{color:var(--spend)} .sect ul.yes li::marker{color:var(--ok)}
+.sect ul.lno li::marker{color:var(--spend)} .sect ul.lyes li::marker{color:var(--ok)}
+/* stop the browser's own pull-to-refresh (a full reload); Artha's own pull syncs without reloading */
+html{overscroll-behavior-y:contain}
 .sect .kvs{display:grid;grid-template-columns:auto 1fr;gap:8px 14px;font-size:13.5px}
 .sect .kvs dt{color:var(--muted)}.sect .kvs dd{margin:0;text-align:right;font-family:var(--mono)}
 .doc{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line);font-size:13.5px;text-decoration:none;color:var(--ink)}

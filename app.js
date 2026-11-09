@@ -1,7 +1,7 @@
 /* Artha 3.9 — investments + insurance. Data lives in the "Artha – My Investments" Google Sheet via the Apps Script API. */
 (()=>{
 "use strict";
-const APP_VERSION="3.9.3";
+const APP_VERSION="3.9.4";
 /* Personal details (banks, platforms, the Claude project link) come from the backend after sign-in, so this public code holds none. */
 const CFG=()=>(typeof DATA!=="undefined"&&DATA&&DATA.cfg)||{};
 const PROJECT_URL=()=>{ const u=safeUrl(CFG().project); return u==="#"?"https://claude.ai/projects":u; };
@@ -1021,7 +1021,7 @@ function renderPolicy(){ const p=policies().find(x=>x.id===SC.id); const B=$("sc
       <div class="kv3"><div><small>${esc(L("f_premium"))}</small><b class="num">${d.premium?money(+d.premium,true):"—"}</b></div><div><small>${esc(L("f_insured"))}</small><b>${esc(p.d.insured||"—")}</b></div><div><small>${esc(L("f_holder"))}</small><b>${esc(p.d.holder||"—")}</b></div></div></div>`; }
   if(cur&&cur.d.status==="reading") x+=`<button class="ai" id="pProc">${svgI("spark","var(--neon2)")}<span><b>Waiting for Claude to read this policy</b><small>Tap to process now</small></span></button>`;
   else if(cur&&(cur.d.docs||[]).length&&!cur.d.read) x+=`<button class="ai" data-act="pol-read" data-term="${esc(cur.id)}">${svgI("spark","var(--neon2)")}<span><b>Read with Claude</b><small>Fill dates, cover, what's covered and exclusions from the policy</small></span></button>`;
-  const list=(k,arr,c)=>arr&&arr.length?`<div class="sect" style="--c:${c}"><h5>${esc(L(k))}<span class="num">${arr.length}</span></h5><ul class="${k==="sec_covered"?"yes":k==="sec_high"?"":"no"}">${arr.map(s=>`<li>${esc(s)}</li>`).join("")}</ul></div>`:"";
+  const list=(k,arr,c)=>arr&&arr.length?`<div class="sect" style="--c:${c}"><h5>${esc(L(k))}<span class="num">${arr.length}</span></h5><ul class="${k==="sec_covered"?"lyes":k==="sec_high"?"":"lno"}">${arr.map(s=>`<li>${esc(s)}</li>`).join("")}</ul></div>`:"";
   if(cur){ x+=list("sec_high",d.highlights,"var(--neon)")+list("sec_covered",d.covered,"var(--ok)")+list("sec_not",d.notCovered,"var(--spend)")+list("sec_excl",d.exclusions,"var(--accent)");
     const kv=[[L("f_insurer"),d.insurer],[L("f_policyNo"),d.policyNo],[L("f_start"),d.start?fmtD(d.start):""],[L("f_end"),d.end?fmtD(d.end):""]].concat(extraFor(p.d.type).map(f=>[f,(d.fields||{})[f]])).concat(Object.entries(d.fields||{}).filter(([k])=>!extraFor(p.d.type).includes(k)));
     x+=`<div class="sect"><h5>${esc(L("sec_extra"))}<button class="edl" data-act="pol-edit" data-term="${esc(cur.id)}">Edit</button></h5><dl class="kvs">${kv.filter(([,v])=>v).map(([k,v])=>`<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")||`<dt>Nothing yet</dt><dd></dd>`}</dl></div>`;
@@ -1432,11 +1432,14 @@ const ub64=s=>Uint8Array.from(atob(s.replace(/-/g,"+").replace(/_/g,"/")),c=>c.c
 const LOCK={ locked:false, hiddenAt:0, AFTER:60000,
   can:()=>!!(window.PublicKeyCredential&&navigator.credentials&&window.isSecureContext),
   on:()=>!!store.get("bioId",""),
-  show(){ if(!LOCK.on()) return; LOCK.locked=true; document.documentElement.classList.add("locked"); $("lock").hidden=false; $("lockErr").textContent="";
+  show(){ if(!LOCK.on()) return; LOCK.locked=true; LOCK.seen(0); document.documentElement.classList.add("locked"); $("lock").hidden=false; $("lockErr").textContent="";
     /* clear the figures from the page itself (not just cover them); they are drawn again after the fingerprint check */
     ["legend","ledger","viewIns","scrBody","res"].forEach(id=>{ const n=$(id); if(n) n.innerHTML=""; });
     ["f0","f1","f2"].forEach(id=>{ const n=$(id); if(n) n.querySelectorAll(".num,b,strong").forEach(x=>{ x.textContent="••••"; }); }); },
-  unlock(){ const was=LOCK.locked; LOCK.locked=false; document.documentElement.classList.remove("locked","veil"); $("lock").hidden=true; if(was&&DATA) refresh(); } };
+  /* a pull-to-refresh or reload in the same session, within a minute of last use, does not ask again; a fresh open always does */
+  seen(t){ try{ if(t) sessionStorage.setItem("arthaSeen",String(t)); else sessionStorage.removeItem("arthaSeen"); }catch(e){} },
+  recent(){ try{ const t=+sessionStorage.getItem("arthaSeen")||0; return t>0&&Date.now()-t<LOCK.AFTER; }catch(e){ return false; } },
+  unlock(){ const was=LOCK.locked; LOCK.locked=false; LOCK.seen(Date.now()); document.documentElement.classList.remove("locked","veil"); $("lock").hidden=true; if(was&&DATA) refresh(); } };
 async function bioCreate(){ const cred=await navigator.credentials.create({publicKey:{challenge:crypto.getRandomValues(new Uint8Array(32)),rp:{name:"Artha"},
   user:{id:crypto.getRandomValues(new Uint8Array(16)),name:store.get("email","")||"artha",displayName:"Artha · "+(store.get("me","")||"me")},
   pubKeyCredParams:[{type:"public-key",alg:-7},{type:"public-key",alg:-257}],
@@ -1447,7 +1450,8 @@ async function bioCheck(){ const a=await navigator.credentials.get({publicKey:{c
 async function unlockNow(){ $("lockErr").textContent=""; try{ await bioCheck(); LOCK.unlock(); if(Date.now()-CACHE_AT>60000) pull(); }catch(e){ $("lockErr").textContent=e&&e.name==="NotAllowedError"?"Cancelled. Tap Unlock to try again.":String(e&&e.message||e); } }
 $("lockBtn").onclick=unlockNow;
 $("lockAlt").onclick=()=>{ store.set("tok",""); $("lock").hidden=true; askPass("Sign in with Google to open Artha."); };
-function lockOnStart(){ if(LOCK.on()){ LOCK.show(); setTimeout(unlockNow,350); } }
+function lockOnStart(){ if(LOCK.on()){ if(LOCK.recent()){ LOCK.seen(Date.now()); return; } LOCK.show(); setTimeout(unlockNow,350); } }
+addEventListener("pagehide",()=>{ if(!LOCK.locked&&LOCK.on()&&document.visibilityState==="visible") LOCK.seen(Date.now()); }); // only a reload while in use, not a page dropped in the background
 function offerLock(){ store.set("bioAsked",true);
   openE(`<div class="t big">Lock Artha with your fingerprint?</div><div class="s" style="text-align:left">Artha will ask for your fingerprint or face each time you open it, and after a minute in the background. You can turn it off in the menu.</div><button class="go" type="button" id="olY">Turn on</button><button class="x" type="button" id="olN">Not now</button>`);
   $("olY").onclick=async()=>{ try{ await bioCreate(); ov.back(); showToast("Fingerprint lock is on"); buildDrawer&&isOpen($("drawer"))&&buildDrawer(); }catch(e){ showToast(e&&e.name==="NotAllowedError"?"Cancelled":"This phone couldn't set up the lock: "+(e&&e.message||e),5000); } };
@@ -1456,7 +1460,7 @@ async function setLock(on){ if(on){ if(!LOCK.can()){ showToast("This browser can
   else { try{ await bioCheck(); store.set("bioId",""); showToast("Fingerprint lock is off"); }catch(e){ showToast("Confirm with your fingerprint to turn the lock off.",4000); } }
   buildDrawer(); }
 /* amounts are veiled the moment Artha goes to the background (app switcher), and it locks after a minute away */
-document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="hidden"){ LOCK.hiddenAt=Date.now(); if(LOCK.on()) document.documentElement.classList.add("veil"); }
+document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="hidden"){ LOCK.hiddenAt=Date.now(); if(!LOCK.locked&&LOCK.on()) LOCK.seen(LOCK.hiddenAt); if(LOCK.on()) document.documentElement.classList.add("veil"); }
   else { if(LOCK.on()&&LOCK.hiddenAt&&Date.now()-LOCK.hiddenAt>LOCK.AFTER){ LOCK.show(); setTimeout(unlockNow,300); } else if(!LOCK.locked) document.documentElement.classList.remove("veil"); } });
 
 /* ---------- saves that the sheet refused: kept here until retried or discarded ---------- */

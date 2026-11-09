@@ -6,7 +6,8 @@
 
 Checks: files present and not truncated, versions consistent, JavaScript parses, CSP hashes match the inline
 scripts, and the app really starts in a headless browser against a fake backend (numbers on screen, no errors,
-no CSP violations, phone↔sheet fingerprint agrees). It also breaks app.js on purpose and expects the boot guard's
+no CSP violations, phone↔sheet fingerprint agrees), the fingerprint lock behaves, and tools/sweep.py opens every screen
+(no JavaScript errors, no text spilling out of its box). It also breaks app.js on purpose and expects the boot guard's
 recovery screen, so a broken release can never show a blank page.
 """
 import base64, hashlib, http.server, json, os, re, socketserver, subprocess, sys, threading
@@ -124,12 +125,20 @@ with sync_playwright() as p:
     # fingerprint lock: figures are cleared from the page while locked and drawn again after unlocking
     ctx, pg, errs, csp = page(); pg.wait_for_timeout(5000)
     pg.evaluate("localStorage.setItem('artha:bioId',JSON.stringify('AAAA'))")
-    pg.add_init_script("""navigator.credentials.get=async()=>{const d=new Uint8Array(37);d[32]=5;return {response:{authenticatorData:d.buffer}};};""")
-    pg.reload(); pg.wait_for_timeout(1500)
-    pg.evaluate("document.dispatchEvent(new Event('x'))")
-    pg.evaluate("document.documentElement.classList.contains('locked')||0")
+    # a new tab has a fresh session, like opening the app from the home screen
+    pg2 = ctx.new_page(); pg2.on("pageerror", lambda e: errs.append(str(e)))
+    pg2.route("https://script.google.com/**", lambda r: r.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": True, "d": DATA})))
+    pg2.route("https://api.mfapi.in/**", lambda r: r.fulfill(status=200, content_type="application/json", body='{"data":[]}'))
+    pg2.add_init_script("""window.__bio=0;navigator.credentials.get=async()=>{window.__bio++;const d=new Uint8Array(37);d[32]=5;return {response:{authenticatorData:d.buffer}};};""")
+    pg.close(); pg = pg2; pg.goto(f"http://127.0.0.1:{port}/index.html"); pg.wait_for_timeout(1500)
+    ok(pg.evaluate("window.__bio") == 1, "a fresh open asks for the fingerprint")
     pg.wait_for_timeout(2500)
     ok("₹" in pg.evaluate("(document.getElementById('legend')||{}).innerText||''") and pg.evaluate("document.getElementById('lock').hidden"), "fingerprint lock opens and the figures come back")
+    pg.reload(); pg.wait_for_timeout(2500)
+    ok(pg.evaluate("window.__bio") == 0 and pg.evaluate("document.getElementById('lock').hidden"), "pull-to-refresh / reload within a minute does not ask again")
+    pg.evaluate("const old=()=>sessionStorage.setItem('arthaSeen',String(Date.now()-120000)); addEventListener('pagehide',old); document.addEventListener('visibilitychange',old)"); pg.reload(); pg.wait_for_timeout(1500)
+    ok(pg.evaluate("window.__bio") == 1, "a reload after more than a minute away asks again")
+    ok(pg.evaluate("getComputedStyle(document.documentElement).overscrollBehaviorY") in ("contain", "none"), "browser pull-to-refresh (full reload) is switched off")
     ok(not errs, "no JavaScript errors with the lock on" + ("" if not errs else ": " + errs[0][:160]))
     ctx.close()
     ctx, pg, errs, csp = page(break_app=True)
@@ -137,5 +146,10 @@ with sync_playwright() as p:
     ok(pg.evaluate("!!document.getElementById('bootFail')"), "a broken app.js shows the recovery screen, not a blank page")
     ctx.close(); b.close()
 srv.shutdown()
+
+# 6. every tab, screen, menu page and add form renders with no errors and no text spilling out of its box
+r = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "sweep.py")], capture_output=True, text=True, env=os.environ)
+print(r.stdout.strip()[-3000:])
+ok(r.returncode == 0, "screen sweep: every screen renders cleanly" + ("" if r.returncode == 0 else " (" + (r.stderr.strip().splitlines() or ["see above"])[-1][:200] + ")"))
 print("\n" + ("ALL CHECKS PASSED" if not FAIL else f"{len(FAIL)} CHECK(S) FAILED — do not publish"))
 sys.exit(1 if FAIL else 0)
