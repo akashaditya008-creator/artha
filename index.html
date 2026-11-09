@@ -53,7 +53,11 @@
 </nav>
 <button class="upbtn" id="upBtn" hidden aria-label="Back to the top"><svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
 
-<div class="upd" id="upd" hidden><span id="updTxt">A new version is ready</span><button type="button" id="updBtn">Update</button></div>
+<div class="upd" id="upd" role="dialog" aria-labelledby="updTitle" hidden>
+  <div class="upd-h"><span class="upd-i"><svg viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg></span>
+    <div class="upd-t"><b id="updTitle">A new version is ready</b><p id="updTxt"></p></div></div>
+  <div class="upd-b"><button type="button" id="updLater">Later</button><button type="button" id="updBtn">Update now</button></div>
+</div>
 <div class="scrim" id="scrim" hidden></div>
 <aside class="drawer" id="drawer" hidden aria-label="Menu">
   <div class="dhead"><div><h2>Artha</h2><small id="verTxt"></small></div><button class="done" id="drawerDone" type="button">Close</button></div>

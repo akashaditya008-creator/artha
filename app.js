@@ -1,7 +1,7 @@
 /* Artha 3.2 — investments + insurance. Data lives in the "Artha – My Investments" Google Sheet via the Apps Script API. */
 (()=>{
 "use strict";
-const APP_VERSION="3.3";
+const APP_VERSION="3.4";
 const PROJECT_URL="https://claude.ai/project/01a1965d-e312-704a-8114-16f0090c8706";
 const $=id=>document.getElementById(id);
 const store={get(k,d){try{const v=localStorage.getItem("artha:"+k);return v==null?d:JSON.parse(v);}catch(e){return d;}},set(k,v){try{localStorage.setItem("artha:"+k,JSON.stringify(v));}catch(e){}}};
@@ -1411,11 +1411,18 @@ function eye(){ $("eyeP").setAttribute("d",HIDE?"M3 3l18 18M10.6 6.1A9.8 9.8 0 0
 $("eyeBtn").onclick=()=>{ HIDE=!HIDE; store.set("hide",HIDE); eye(); refresh(); }; eye();
 function refresh(){ build(); if(TAB_NOW==="ins") renderIns(); else renderHome(); paintBell(); if(isOpen($("drawer"))) buildDrawer(); if(SC&&isOpen($("scr"))) renderScr(); if(isOpen($("sheet"))) doSearch(); }
 $("verTxt").textContent="Version "+APP_VERSION;
+/* update card: never pops over an open screen or entry; waits until you're back on Home */
+let UPD=null, updT=0;
+const updShort=n=>{ n=(n||"").trim(); const f=n.split(/,\s*/); return f.length>2?f.slice(0,2).join(", ")+" and more":n; };
+function showUpd(){ clearTimeout(updT); if(!UPD) return;
+  if(ov.stack.length||document.activeElement?.matches?.("input,textarea,select")){ updT=setTimeout(showUpd,3000); return; }
+  $("updTitle").textContent=`Artha ${UPD.v} is ready`; $("updTxt").textContent=updShort(UPD.note); $("updBtn").textContent="Update now"; $("upd").hidden=false; }
 async function checkUpdate(manual){ try{ const j=await (await fetch("version.json?t="+Date.now(),{cache:"no-store"})).json();
-    if(j.v&&j.v!==APP_VERSION){ $("updTxt").textContent=j.note?`New: ${j.note}`:"A new version is ready"; $("upd").hidden=false; } else if(manual) showToast("You're on the latest version"); }
+    if(j.v&&j.v!==APP_VERSION){ UPD=j; if(manual||store.get("updLater")!==j.v) showUpd(); } else if(manual) showToast("You're on the latest version"); }
   catch(e){ if(manual) showToast("Couldn't check, you seem to be offline"); } }
 async function doUpdate(){ $("updBtn").textContent="Updating…"; try{ const reg=await navigator.serviceWorker?.getRegistration(); if(reg) await reg.update(); const ks=await caches.keys(); await Promise.all(ks.filter(k=>k.startsWith("artha-")).map(k=>caches.delete(k))); }catch(e){} location.reload(); }
-$("updBtn").onclick=doUpdate; $("verBtn").onclick=()=>checkUpdate(true); setTimeout(checkUpdate,2500);
+$("updBtn").onclick=doUpdate; $("updLater").onclick=()=>{ if(UPD) store.set("updLater",UPD.v); clearTimeout(updT); $("upd").hidden=true; showToast("OK. Menu › Check for updates whenever you're ready"); };
+$("verBtn").onclick=()=>checkUpdate(true); setTimeout(checkUpdate,2500);
 document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="visible"){ checkUpdate(); refresh(); if(Date.now()-CACHE_AT>60000) pull(); } });
 if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(()=>{});
 S3.initBg($("bg3d")); { const a=ACC.find(x=>x[0]===store.get("acc","")); if(a) setTimeout(()=>S3.ringColor(a[2]),50); }
