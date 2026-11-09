@@ -1,7 +1,7 @@
 /* Artha 3.2 — investments + insurance. Data lives in the "Artha – My Investments" Google Sheet via the Apps Script API. */
 (()=>{
 "use strict";
-const APP_VERSION="3.2";
+const APP_VERSION="3.3";
 const PROJECT_URL="https://claude.ai/project/01a1965d-e312-704a-8114-16f0090c8706";
 const $=id=>document.getElementById(id);
 const store={get(k,d){try{const v=localStorage.getItem("artha:"+k);return v==null?d:JSON.parse(v);}catch(e){return d;}},set(k,v){try{localStorage.setItem("artha:"+k,JSON.stringify(v));}catch(e){}}};
@@ -113,7 +113,7 @@ let DATA=store.get("cache",null), CACHE_AT=store.get("cacheAt",0), OUT=store.get
 let M=null, WHO=store.get("who","all"); if(!["all","Aditya","Spardha"].includes(WHO)) WHO="all";
 const saveOut=()=>store.set("outbox",OUT);
 const BANK_RE=/\s*\[bank ([^\]]+)\]/, FY_RE=/\s*\[fy (\d{4})\]/, DUE_RE=/\s*\[due (\d{4}-\d{2}-\d{2})\]/, TDS_RE=/\s*\[tds ([\d.]+)\]/, NET_RE=/\s*\[net ([\d.]+)\]/, PR_RE=/\s*\[p ([\d.]+)\]/;
-const cleanNote=n=>String(n||"").replace(BANK_RE,"").replace(FY_RE,"").replace(DUE_RE,"").replace(TDS_RE,"").replace(NET_RE,"").replace(PR_RE,"").trim();
+const cleanNote=n=>String(n||"").replace(/\s*\[bal\]\s*/,"").replace(BANK_RE,"").replace(FY_RE,"").replace(DUE_RE,"").replace(TDS_RE,"").replace(NET_RE,"").replace(PR_RE,"").trim();
 
 /* records (insurance, bond schedules, inbox) — server copy + changes waiting to sync */
 function recMap(){ const R=new Map(); ((DATA&&DATA.rec)||[]).forEach(r=>R.set(r[0],{id:r[0],kind:r[1],d:r[2]||{}}));
@@ -313,7 +313,7 @@ function drawTiles(){ const T=totals(), keys=["all"].concat(T.G.map(g=>g.h)), co
   const P=pct100(keys.slice(1).map(k=>{ const f=figOf(T,k); return FACE===0?f.put:f.cur; }));
   $("legend").innerHTML=keys.map((k,ki)=>{ const f=figOf(T,k), v=FACE===0?f.put:FACE===1?f.cur:f.gain, share=k==="all"?(FACE===2?"":"100%"):FACE===2?(f.bond?"expected":""):base?P[ki-1]+"%":"";
     return `<button class="lg" data-s="${k}" aria-pressed="${SCOPE===k}" style="--c:${colOf(k)}"><small>${SCOPEL[k]}</small><b class="num ${FACE===2?cls(v):""}">${FACE===2?smoney(v,true):money(v,true)}</b><i>${share||"&nbsp;"}</i></button>`; }).join("");
-  $("homeOpen").innerHTML=SCOPE==="all"?`<p class="hint">Swipe the number or the ring's centre for value and profit · spin, tilt or tap a slice</p>`:`<button class="btn2 wide" id="openSc" style="border-color:${colOf(SCOPE)}">Open ${SCOPEF[SCOPE]} ›</button>`;
+  $("homeOpen").innerHTML=SCOPE==="all"?`<p class="hint">Swipe sideways to switch · drag at an angle to turn</p>`:`<button class="opensc" id="openSc" style="--c:${colOf(SCOPE)}">Open ${SCOPEF[SCOPE]} ›</button>`;
   const o=$("openSc"); if(o) o.onclick=()=>openScr(SCOPE);
   document.querySelectorAll("#legend [data-s],#scope [data-s]").forEach(b=>b.onclick=()=>setScope(b.dataset.s)); ringLabels(T); }
 function flatRing(G){ const tot=SUM(G,x=>x.r.cur)||1, R=72, C=2*Math.PI*R; let off=0;
@@ -321,7 +321,10 @@ function flatRing(G){ const tot=SUM(G,x=>x.r.cur)||1, R=72, C=2*Math.PI*R; let o
 function ringSegs(T){ const G=T.G.filter(x=>x.r.cur>0), base=G.map(({h})=>{ const f=figOf(T,h); return FACE===0?f.put:f.cur; }), P=pct100(base);
   return G.map(({h},i)=>{ const f=figOf(T,h), v=FACE===0?f.put:FACE===1?f.cur:f.gain;
     return {c:h,v:base[i],col:CLS[h].col,name:esc(SCOPEL[h]),val:FACE===2?smoney(v,true):money(v,true),share:FACE===2?(f.x!=null?pct(f.x)+" a yr":""):P[i]+"%"}; }); }
-const RINGCB={onPop:c=>ringPop(c),onOpen:c=>openScr(c),onSwipe:d=>setFace(FACE+d)};
+/* the hero figure follows a sideways drag (on the number or the ring); null puts it back */
+function dragFace(dx){ const fc=$("faces"); fc.querySelectorAll(".fc").forEach(el=>{ el.style.transition=""; el.style.transform=""; el.style.opacity=""; });
+  if(dx==null) return; const on=fc.querySelector(".fc.on"); if(on){ on.style.transition="none"; on.style.transform=`translateX(${dx*.6}px)`; on.style.opacity=String(Math.max(.25,1-Math.abs(dx)/260)); } }
+const RINGCB={onPop:c=>ringPop(c),onOpen:c=>openScr(c),onSwipe:d=>setFace(FACE+d),onSwipeMove:dx=>dragFace(dx)};
 function ringLabels(T){ const st=$("stage"); if(S3.ok&&!calm()&&st.querySelector("canvas.ring3d")) S3.ring(st,ringSegs(T||totals()),RINGCB); }
 function drawRing(){ const T=totals(), st=$("stage"), G=T.G.filter(x=>x.r.cur>0);
   const use3d=S3.ok&&!calm(); st.classList.toggle("flatmode",!use3d);
@@ -354,16 +357,20 @@ function renderHome(){
   $("whos").querySelectorAll("button").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.w===WHO)));
   const list=VIEW==="list"; $("homeRing").hidden=list; $("ledger").hidden=!list;
   $("viewList").setAttribute("aria-pressed",String(list)); $("viewRing").setAttribute("aria-pressed",String(!list));
-  if(list) drawList(); else drawRing(); paintBell();
+  fitHome(); if(list) drawList(); else drawRing(); paintBell();
 }
+/* the 3D home is one screen: no page scroll, the ring takes whatever height is left */
+function fitHome(){ const on=!$("viewInv").hidden&&VIEW!=="list"; document.documentElement.classList.toggle("homefit",on); if(on) scrollTo(0,0); }
 $("segv").onclick=e=>{ const b=e.target.closest("button"); if(!b) return; VIEW=b.id==="viewList"?"list":"chart"; store.set("view",VIEW); renderHome(); };
 (()=>{ const h=$("hero"), fc=$("faces"); let x0=null,y0=null,sw=0;
   /* the figure follows the finger, then snaps to the next one */
   h.addEventListener("pointerdown",e=>{ if(e.target.closest("#meas")) return; x0=e.clientX; y0=e.clientY; });
-  h.addEventListener("pointermove",e=>{ if(x0==null) return; const dx=e.clientX-x0, dy=e.clientY-y0; if(Math.abs(dx)>Math.abs(dy)){ const on=fc.querySelector(".fc.on"); if(on){ on.style.transition="none"; on.style.transform=`translateX(${dx*.6}px)`; on.style.opacity=String(Math.max(.25,1-Math.abs(dx)/260)); } } });
-  const end=e=>{ if(x0==null) return; const dx=e.clientX-x0, dy=e.clientY-y0; x0=null; fc.querySelectorAll(".fc").forEach(el=>{ el.style.transition=""; el.style.transform=""; el.style.opacity=""; });
-    if(Math.abs(dx)>30&&Math.abs(dx)>Math.abs(dy)*1.1){ sw=Date.now(); setFace(FACE+(dx<0?1:-1)); } };
-  h.addEventListener("pointerup",end); h.addEventListener("pointercancel",()=>{ x0=null; fc.querySelectorAll(".fc").forEach(el=>{ el.style.transition=""; el.style.transform=""; el.style.opacity=""; }); });
+  /* sideways = within 30° of horizontal */
+  const side=(dx,dy)=>Math.abs(dy)<=Math.abs(dx)*.577;
+  h.addEventListener("pointermove",e=>{ if(x0==null) return; const dx=e.clientX-x0, dy=e.clientY-y0; if(Math.abs(dx)>8&&side(dx,dy)) dragFace(dx); else dragFace(null); });
+  const end=e=>{ if(x0==null) return; const dx=e.clientX-x0, dy=e.clientY-y0; x0=null; dragFace(null);
+    if(Math.abs(dx)>40&&side(dx,dy)){ sw=Date.now(); setFace(FACE+(dx<0?1:-1)); } };
+  h.addEventListener("pointerup",end); h.addEventListener("pointercancel",()=>{ x0=null; dragFace(null); });
   $("faces").onclick=()=>{ if(Date.now()-sw<500) return; setFace(FACE+1); };
   $("meas").querySelectorAll("button").forEach((b,k)=>b.onclick=()=>setFace(k)); })();
 $("whos").querySelectorAll("button").forEach(b=>b.onclick=()=>setWho(b.dataset.w));
@@ -402,7 +409,7 @@ function bindRows(el){
 
 /* ---------- category screens (header scrolls with the page) ---------- */
 let SC=null; const ACT=new Set();
-const TABS3={Stocks:["Holdings","Growth","Charges","Activity"],"Mutual Funds":["Holdings","Growth","Activity"],Bonds:["Bonds","Payouts","TDS","Activity"],NPS:["Growth","Activity"],Other:["Items","Growth","Activity"]};
+const TABS3={Stocks:["Holdings","Balance","Growth","Charges","Activity"],"Mutual Funds":["Holdings","Growth","Activity"],Bonds:["Bonds","Payouts","TDS","Activity"],NPS:["Growth","Activity"],Other:["Items","Growth","Activity"]};
 const scrHead=(t,sub)=>`<div class="hd"><button class="ib" data-back aria-label="Back"><svg viewBox="0 0 24 24"><path d="M19 12H5M11 6l-6 6 6 6"/></svg></button><h2>${esc(t)}</h2>${sub||""}</div>`;
 function openScr(h,opts){ SC=Object.assign({h,tab:(TABS3[h]||[])[0]||"",sort:"value"},opts||{}); ACT.clear(); S3.theme(h==="pol"?"ins":h); renderScr();
   if(!isOpen($("scr"))) ov.open($("scr"),()=>{ vanish($("scr")); SC=null; S3.theme(TAB_NOW==="ins"?"ins":"home"); upCheck(); }); else { const b=$("scrBody"); b.classList.remove("swap"); void b.offsetWidth; b.classList.add("swap"); }
@@ -430,6 +437,7 @@ function renderScr(){
   else if(SC.tab==="Payouts") x+=`<div id="pChart"></div>`+payoutList();
   else if(SC.tab==="Items") x+=itemsBody();
   else if(SC.tab==="Charges") x+=chargesBody();
+  else if(SC.tab==="Balance") x+=balanceBody();
   else if(SC.tab==="TDS") x+=tdsBody();
   dk.innerHTML=h==="Bonds"?`<div class="in"><button class="btn2" data-act="bell">Repayments</button><button class="btn1" data-act="add">Add bond</button></div>`
     :h==="NPS"?`<div class="in"><button class="btn2" data-act="npsval">Update value</button><button class="btn1" data-act="add">Add contribution</button></div>`
@@ -456,6 +464,8 @@ function doAct(a,el){
   else if(a==="vals") openValues(h);
   else if(a==="bell") openBell();
   else if(a==="chg-up") chargesUpload();
+  else if(a==="bal-fix") fixBalance(el.dataset.u);
+  else if(a==="bal-all"){ SC.balAll=1; renderScr(); }
   else if(a==="pol-renew") policyUpload(SC.id,"renew");
   else if(a==="pol-doc") policyUpload(SC.id,"doc");
   else if(a==="pol-read") policyRead(SC.id,el&&el.dataset.term);
@@ -803,6 +813,38 @@ function chargesBody(){ const Y=chargeYears(WHO), tot=SUM(Y,x=>x.tot);
       ${x.rec&&x.rec.items?`<div class="brk">${CHL.filter(([k])=>+x.rec.items[k]).map(([k,l])=>`<span>${l}<b>${esc(rs(+x.rec.items[k],false))}</b></span>`).join("")}</div>`:""}</div>`).join(""):`<div class="empty">No charges recorded yet.</div>`)
     +`<button class="ai" data-act="chg-up">${svgI("spark","var(--neon2)")}<span><b>Reconcile with Groww statements</b><small>Upload the FY's Stocks P&L report and ledger statement · Claude works out the exact charges</small></span></button>
     <p class="hint">New trades use Groww's published rates as an estimate; the statement replaces that with the real figure for the year (one adjusting entry per year).</p>`; }
+/* ---------- broker balance ledger: every rupee in and out of the Groww balance, with a running total ---------- */
+const BALSG={"Add money":1,"Sell":1,"Redeem":1,"Dividend":1,"Other income":1,"F&O result":1,"Withdraw":-1,"Buy":-1,"Charges":-1};
+function balLedger(u){ const seen=new Set(), L=[];
+  M.tx.forEach(t=>{ const r=t.src; if(t.internal||!r||seen.has(t.id)||r.acct!==u.acct||r.who!==u.who) return;
+    if(!(r.via==="Balance"||r.asset==="Cash"||r.asset==="F&O")) return; const sg=BALSG[r.type]||0; if(!sg||!r.amount) return; seen.add(t.id); L.push({t,v:sg*r.amount}); });
+  L.sort((a,b)=>(a.t.date||"")<(b.t.date||"")?-1:(a.t.date||"")>(b.t.date||"")?1:a.t.i-b.t.i); let b=0; L.forEach(x=>{ b+=x.v; x.b=r2(b); }); return L; }
+const balUnits=()=>(M.units||[]).filter(u=>u.h==="Stocks"&&(WHO==="all"||u.who===WHO)).map(u=>({u,L:balLedger(u)})).filter(x=>x.L.length);
+function balTitle(t){ const r=t.src, n=r.name?" "+r.name:"", bal=/\[bal\]/.test(r.note||"");
+  if(bal) return "Balance corrected";
+  return {"Add money":"Added from bank"+(t.bank?" · "+t.bank:""),"Withdraw":"Taken out to bank"+(t.bank?" · "+t.bank:""),"Buy":(r.asset==="Mutual Funds"?"Fund bought":"Bought")+n,"Sell":"Sold"+n,"Redeem":"Redeemed"+n,
+    "Charges":r.note&&/\[fy /.test(r.note)?"Charges · exact for the year":"Charges"+(/buy |sale /.test(r.note||"")?" · "+(r.note.split(" · ").pop()):""),"Dividend":"Dividend"+n,"Other income":"Other income"+n,"F&O result":"F&O result"}[r.type]||r.type; }
+function balanceBody(){ const X=balUnits();
+  if(!X.length) return `<div class="empty">No money in or out of a broker balance yet.</div>`;
+  return X.map(({u,L},ui)=>{ const R=L.slice().reverse(), show=SC.balAll?R:R.slice(0,40), cur=L[L.length-1].b, k=u.acct+"|"+u.who;
+    return `<div class="balc"><div class="l">${esc(u.acct)}${u.who!==holderOf(u.acct)?` · ${esc(u.who)}'s money`:""}</div><div class="v num ${cur<0?"loss":""}">${money(cur,false)}</div>
+      <div class="s">Cash in the balance by Artha's count · charges on new trades are estimates</div><button class="btn2" data-act="bal-fix" data-u="${esc(k)}">Correct to ${esc(platOf(u.acct)||"the app")}'s figure</button></div>
+      <div class="grp">${show.map(({t,v,b})=>`<button class="tx" data-tx="${t.i}"><span class="n">${esc(balTitle(t))}</span><span class="amt num ${v<0?"loss":""}">${v<0?"−":"+"}${money(Math.abs(v),false)}</span>
+        <span class="m"><span>${esc(fmtDs(t.date))}${t.trade?" · "+esc(qtyf(t.trade.qty)+" @ "+rs(t.trade.price,false)):""}</span><span class="num">Balance ${money(b,false)}</span>${t.pending?`<span class="chip sync">Syncing…</span>`:""}</span></button>`).join("")}</div>
+      ${R.length>show.length?`<button class="more" data-act="bal-all">Show all ${R.length} entries ›</button>`:""}`; }).join("")
+    +`<p class="hint">Tap an entry to edit or delete it</p>`; }
+function fixBalance(k){ const x=balUnits().find(y=>y.u.acct+"|"+y.u.who===k)||balUnits()[0]; if(!x) return; const {u,L}=x, cur=L[L.length-1].b, pl=platOf(u.acct)||"the app";
+  openE(`<div class="t big">Correct the ${esc(platOf(u.acct)||"broker")} balance</div><div class="s" style="text-align:left">${esc(u.acct)} · ${esc(u.who)}'s money<br>Artha's count today: <b>${esc(rs(cur,false))}</b></div>
+    <label class="fld"><span>Balance ${esc(platOf(u.acct)||"the app")} shows right now ₹</span><input id="bAct" inputmode="decimal" autocomplete="off" placeholder="e.g. 869.40"></label>
+    <div class="s" id="bDiff" style="text-align:left">The difference is saved as one dated entry (a charges adjustment if Groww shows less), so the history stays intact and the year-end statement upload still squares it.</div>
+    <button class="go" type="button" id="bOk" disabled>Save correction</button>${closeBtn}`);
+  const inp=$("bAct"), go=$("bOk"); setTimeout(()=>inp.focus(),60);
+  const diffOf=()=>{ const a=numIn(inp.value); return inp.value.trim()===""||isNaN(a)?null:r2(cur-a); };
+  inp.oninput=()=>{ const d=diffOf(); go.disabled=d==null||Math.abs(d)<.01;
+    $("bDiff").innerHTML=d==null?"Enter what Groww shows.":Math.abs(d)<.01?"Matches — nothing to correct.":d>0?`${esc(pl)} has <b>${esc(rs(d,false))}</b> less. Saved as a charges adjustment of ${esc(rs(d,false))} today.`:`${esc(pl)} has <b>${esc(rs(-d,false))}</b> more. Saved as other income of ${esc(rs(-d,false))} today.`; };
+  go.onclick=()=>{ const d=diffOf(); if(d==null||Math.abs(d)<.01) return; const a=r2(cur-d);
+    OUT.push({kind:"add",rows:[{date:M.today,who:u.who,acct:u.acct,asset:"Cash",type:d>0?"Charges":"Other income",name:"",code:"",qty:"",price:"",amt:Math.abs(d),via:"Balance",note:`[bal] Balance set to ${rs(a,false)} as shown in ${pl} (was ${rs(cur,false)} in Artha)`}],rid:rid()});
+    saveOut(); ov.back(); refresh(); flush(); celebrate("Balance corrected",`${u.acct} · now ${rs(a,false)}`); }; }
 function chargesUpload(pre){ const accts=M.accts.filter(a=>/groww/i.test(a)); const Y=chargeYears("all"); const fys=[...new Set([fyOf(M.today)].concat(Y.map(x=>x.fy)))].sort((a,b)=>b-a);
   let acct=pre&&pre.acct||accts[0]||"Groww · Aditya", fy=pre&&pre.fy||(Y.find(x=>x.open)||{}).fy||fyOf(M.today)-1;
   const draw=()=>{ openE(`<div class="t big">${svgI("spark","var(--neon2)",20)} Exact charges for a year</div>
@@ -1057,7 +1099,9 @@ const TCOL={stocks:CLS.Stocks.col,us:CLS.Stocks.col,cash:CLS.Stocks.col,mf:CLS["
 /* bank accounts: money always leaves from / lands in the account holder's own bank */
 const BANKS={Aditya:[["ICICI","Primary","#F58220"],["SBI","","#2D9CDB"],["PNB","","#C0392B"]],Spardha:[["HDFC","Usual","#3D7CF0"],["Ujjivan","","#7BDB5A"],["Canara","","#F2C94C"]]};
 const bankList=acct=>BANKS[holderOf(acct)]||BANKS.Aditya;
-const bankPick=acct=>{ const L=bankList(acct), b=store.get("bank:"+acct,""); return L.some(x=>x[0]===b)?b:L[0][0]; };
+/* the other person's banks, labelled with whose bank it is (e.g. Aditya's money paid from Spardha's HDFC) */
+const otherBanks=acct=>{ const h=BANKS[holderOf(acct)]?holderOf(acct):"Aditya"; return Object.keys(BANKS).filter(p=>p!==h).flatMap(p=>BANKS[p].map(([b,,c])=>[b+" · "+p,"",c])); };
+const bankPick=acct=>{ const L=bankList(acct).concat(otherBanks(acct)), b=store.get("bank:"+acct,""); return L.some(x=>x[0]===b)?b:L[0][0]; };
 const A={mode:"in",digits:"",date:"",who:"Aditya",pre:{},step:"cats",type:null,det:{}};
 const amtNum=()=>Number(A.digits||0);
 const typeOf=id=>TYPES.find(t=>t[0]===id)||TYPES[0];
@@ -1112,9 +1156,12 @@ function fdSched(P,rate,start,end,pay,comp){ const r=rate/100, S=[]; if(!(P>0&&r
   while(d<end){ S.push({d,p:0,i:Math.round(P*r*days(prev,d)/365*100)/100}); prev=d; d=addMonths(d,step); }
   S.push({d:end,p:P,i:Math.round(P*r*days(prev,end)/365*100)/100}); return S; }
 /* the money source / destination row: bank chips (+ the broker balance for stocks) */
-function bankRow(d,acct,opt){ const L=bankList(acct), extra=opt.extra||[], cur=d.via==="Balance"?"__bal":d.bank;
+function bankRow(d,acct,opt){ const O=otherBanks(acct), extra=opt.extra||[], cur=d.via==="Balance"?"__bal":d.bank, more=d.bankMore||O.some(x=>x[0]===cur);
+  const L=bankList(acct).concat(more?O:[]), who2=[...new Set(O.map(x=>x[0].split(" · ")[1]))].join(" / ");
   return `<div class="fld"><span>${opt.label}</span><div class="banks" id="dBank">${extra.map(([v,l])=>`<button type="button" data-v="${v}" aria-pressed="${cur===v}"><i style="--bc:var(--neon)"></i>${esc(l)}</button>`).join("")}
-    ${L.map(([b,tag,c])=>`<button type="button" data-v="${b}" aria-pressed="${cur===b}"><i style="--bc:${c}"></i>${b}${tag?` <small>${tag}</small>`:""}</button>`).join("")}</div>${opt.hint?`<small class="hint" style="display:block;margin-top:6px">${opt.hint}</small>`:""}</div>`; }
+    ${L.map(([b,tag,c])=>`<button type="button" data-v="${esc(b)}" aria-pressed="${cur===b}"><i style="--bc:${c}"></i>${esc(b)}${tag?` <small>${tag}</small>`:""}</button>`).join("")}${(more||!O.length?"":`<button type="button" data-v="__more" aria-pressed="false" class="bmore">+ ${esc(who2)}'s bank</button>`)}</div>${opt.hint?`<small class="hint" style="display:block;margin-top:6px">${opt.hint}</small>`:""}</div>`; }
+/* cash sitting in a broker balance for one account + whose money */
+function cashOf(acct,who){ const u=(M.units||[]).find(x=>x.acct===acct&&x.who===who&&x.h==="Stocks"); return u?r2(u.cash):0; }
 const MFSTAMP=0.00005; // stamp duty on mutual fund purchases (0.005%)
 function drawDet(){
   const d=A.det, type=A.type, inv=A.mode==="in", T=typeOf(type), label=T[1];
@@ -1136,8 +1183,8 @@ function drawDet(){
   const keep=()=>{ const g=id=>$(id)?$(id).value:undefined; ["name","note","qty","rate","end","amt","net","px","exp"].forEach(k=>{ const v=g("d"+k[0].toUpperCase()+k.slice(1)); if(v!==undefined) d[k]=v; }); const o=g("dAcctO"); if(o!==undefined) d.acct=o.trim();
     const rr=[...document.querySelectorAll("#dReps .rr")]; if(rr.length) d.reps=rr.map(r=>({d:r.querySelector("input[type=date]").value,a:r.querySelector("input[inputmode]").value})); };
   const verb=inv?(term?"Premium":stock?"Buying":cash?"Adding to account":"Investing"):stock?"Selling":isBond?"Money back":cash?"Taking out":"Taking out";
-  const plat=platOf(d.acct)||"broker";
-  const viaRow=stock?bankRow(d,d.acct,{label:inv?"Paid from":"Money went to",extra:[["__bal",inv?plat+" balance":"Stayed in "+plat]],hint:inv?(d.via==="Balance"?"Money already in the balance was counted when it went in.":"Counts as new money put in."):(d.via==="Balance"?"Still invested: it waits in the balance.":"Comes off what you've put in.")})
+  const plat=platOf(d.acct)||"broker", balNow=cashOf(d.acct,A.who);
+  const viaRow=stock?bankRow(d,d.acct,{label:inv?"Paid from":"Money went to",extra:[["__bal",inv?plat+" balance":"Stayed in "+plat]],hint:inv?(d.via==="Balance"?`Uses cash already in ${esc(A.who)}'s ${esc(plat)} balance (${esc(rs(balNow,false))} now). That cash was counted as money put in when you added it, so this only moves it into the shares. Stocks › Balance shows every move.`:"Counts as new money put in: saved as money added to "+esc(plat)+" + the buy."):(d.via==="Balance"?"Still invested: it waits in the balance.":"Comes off what you've put in.")})
     :mf?bankRow(d,d.acct,{label:inv?"Paid from bank":"Money went to bank"})
     :term?bankRow(d,"Insurance",{label:"Paid from"})
     :bankRow(d,d.acct||A.who,{label:inv?(cash?"From bank":"Paid from"):(cash?"To bank":"Received in")});
@@ -1168,13 +1215,13 @@ function drawDet(){
   seg("dWho",v=>{ A.who=v; paintWho(); if(nps) d.acct="NPS · "+v;
     else if(!d.acctPicked&&!d.acctOther&&holderOf(d.acct)!==v){ const tw=AC.find(a=>platOf(a)===platOf(d.acct)&&holderOf(a)===v); if(tw){ d.acct=tw; d.bank=bankPick(tw); } } });
   seg("dAcct",v=>{ if(v==="__o"){ d.acctOther=1; d.acct=""; setTimeout(()=>$("dAcctO")&&$("dAcctO").focus(),30); } else { d.acctOther=0; d.acct=v; d.acctPicked=1; d.bank=bankPick(v); } });
-  seg("dBank",v=>{ if(v==="__bal") d.via="Balance"; else { d.via="Bank"; d.bank=v; } });
+  seg("dBank",v=>{ if(v==="__more"){ d.bankMore=1; return; } if(v==="__bal") d.via="Balance"; else { d.via="Bank"; d.bank=v; } });
   seg("dFdPay",v=>d.fdPay=v); seg("dRet",v=>d.ret=v); seg("dTill",v=>d.till=v); seg("dComp",v=>d.comp=v); seg("dOPay",v=>d.fdPay=v); seg("dKind",v=>d.kind=v);
   const nm=$("dName"); if(nm&&nm.tagName==="SELECT") nm.onchange=()=>{ keep(); d.qty=""; drawDet(); };
   const all=$("dAll"); if(all) all.onclick=()=>{ keep(); d.qty=String(r4(hsel.qty)); drawDet(); };
   const calc=()=>{ const el=$("dCalc"); if(!el) return; const v=id=>numIn($(id)?$(id).value:""), sum=$("dSum");
     if(stock){ const T2=tradeCalc(inv,v("dQty"),v("dPx"),v("dNet"),d.acct,type==="us");
-      el.innerHTML=T2.val?`<div><span>Trade value</span><b>${esc(rs(T2.val,false))}</b></div><div><span>Charges${T2.est?" (estimated · trued up from your Groww statement)":T2.ch?"":" (none)"}</span><b>${esc(T2.ch?"₹"+T2.ch.toLocaleString("en-IN"):"₹0")}</b></div><div><span>${inv?"Total paid":"You receive"}</span><b>${esc(rs(T2.net,false))}</b></div>`
+      el.innerHTML=T2.val?`<div><span>Trade value</span><b>${esc(rs(T2.val,false))}</b></div><div><span>Charges${T2.est?" (estimated)":T2.ch?"":" (none)"}</span><b>${esc(T2.ch?"₹"+T2.ch.toLocaleString("en-IN"):"₹0")}</b></div><div><span>${inv?"Total paid":"You receive"}</span><b>${esc(rs(T2.net,false))}</b></div>${d.via==="Balance"?`<div><span>${esc(plat)} balance after</span><b class="${inv&&balNow-T2.net<0?"loss":""}">${esc(rs(balNow+(inv?-T2.net:T2.net),false))}</b></div>`:""}`
         :"<div><span>Shares × cost per share gives the trade value. Charges are added as their own entry.</span></div>";
       if(sum) sum.textContent=T2.net?rs(T2.net,false):""; }
     else if(mf){ const a=v("dAmt"), u=v("dQty"), px=hsel&&hsel.qty?hsel.cur/hsel.qty:0;
@@ -1321,7 +1368,7 @@ $("gForm").addEventListener("submit",e=>{ e.preventDefault(); if(!$("gLink").hid
 /* ---------- chrome: tabs, header, scroll, pull to refresh, drawer ---------- */
 let tt; function showToast(t,ms){ const el=$("toast"); el.textContent=t; el.hidden=false; el.style.animation="none"; void el.offsetWidth; el.style.animation=""; clearTimeout(tt); tt=setTimeout(()=>el.hidden=true,ms||2800); }
 let TAB_NOW=store.get("tab","inv"); if(!["inv","ins"].includes(TAB_NOW)) TAB_NOW="inv";
-function setTab(t){ TAB_NOW=t; store.set("tab",t); $("viewInv").hidden=t!=="inv"; $("viewIns").hidden=t!=="ins"; $("tabInv").setAttribute("aria-pressed",String(t==="inv")); $("tabIns").setAttribute("aria-pressed",String(t==="ins"));
+function setTab(t){ TAB_NOW=t; store.set("tab",t); $("viewInv").hidden=t!=="inv"; $("viewIns").hidden=t!=="ins"; fitHome(); $("tabInv").setAttribute("aria-pressed",String(t==="inv")); $("tabIns").setAttribute("aria-pressed",String(t==="ins"));
   S3.theme(t==="ins"?"ins":"home"); if(t==="ins") renderIns(); else renderHome(); scrollTo({top:0}); }
 $("tabInv").onclick=()=>setTab("inv"); $("tabIns").onclick=()=>setTab("ins");
 $("addBtn").onclick=()=>{ if(SC&&isOpen($("scr"))&&SC.h==="pol") return policyUpload(SC.id,"renew"); if(TAB_NOW==="ins"&&!(SC&&isOpen($("scr")))) return addPolicy(); openAdd("in",SC&&isOpen($("scr"))&&SC.h!=="pol"?(SC.h==="NPS"?{type:"nps"}:{a:SC.h}):{}); };

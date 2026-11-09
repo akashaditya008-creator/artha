@@ -1,4 +1,4 @@
-/* Artha 3.2 — 3D layer: a living background on every screen, and the 3D allocation ring on home.
+/* Artha 3.3 — 3D layer: a living background on every screen, and the 3D allocation ring on home.
    Ring physics: a flywheel on a viscous bearing (drag to spin, flick and it keeps turning, friction slows it),
    tilt on a damped spring (push it up or down, it settles back with a small wobble).
    Falls back silently (the app draws a flat ring) when WebGL or three.js isn't available. */
@@ -117,7 +117,7 @@ S.ring=function(host,segs,cb){
     og.setAttribute("position",new T.BufferAttribute(op,3)); const orbit=new T.Points(og,new T.PointsMaterial({color:0x3CF0D4,size:.06,transparent:true,opacity:.8,blending:T.AdditiveBlending})); root.add(orbit);
     RG={host,c,lab,r,scene,cam,root,spin,halo,halo2,orbit,meshes:[],labs:new Map(),key:"",dead:false,cb:cb||{},
       th:0,w:.12,ph:TILT0,pv:0,yaw:0,drag:null,pop:null,zoom:0,t0:0,W:320,H:236};
-    const size=()=>{ const w=host.clientWidth||320, h=Math.round(w*.8); RG.W=w; RG.H=h; r.setSize(w,h,false); c.style.width=w+"px"; c.style.height=h+"px"; cam.aspect=w/h; cam.updateProjectionMatrix(); };
+    const size=()=>{ const w=host.clientWidth||320, hh=host.clientHeight, h=hh>120?hh:Math.round(w*.8); RG.W=w; RG.H=h; r.setSize(w,h,false); c.style.width=w+"px"; c.style.height=h+"px"; cam.aspect=w/h; cam.updateProjectionMatrix(); RG.dist=Math.max(8.4,3.15/(Math.tan(18*Math.PI/180)*cam.aspect)); };
     size(); new ResizeObserver(size).observe(host);
     const ray=new T.Raycaster(), v2=new T.Vector2();
     const pick=e=>{ const b=c.getBoundingClientRect(); v2.set((e.clientX-b.left)/b.width*2-1,-(e.clientY-b.top)/b.height*2+1); ray.setFromCamera(v2,cam); const h=ray.intersectObjects(RG.meshes); return h[0]&&h[0].object; };
@@ -129,7 +129,9 @@ S.ring=function(host,segs,cb){
       c.setPointerCapture(e.pointerId); });
     c.addEventListener("pointermove",e=>{ const d=RG.drag; if(!d) return; const now=performance.now(), dt=Math.max(1,now-d.lt)/1000, dx=e.clientX-d.lx, dy=e.clientY-d.ly;
       d.lx=e.clientX; d.ly=e.clientY; d.lt=now; d.moved+=Math.abs(dx)+Math.abs(dy);
-      if(!d.mode&&d.moved>6){ const ax=Math.abs(e.clientX-d.x0), ay=Math.abs(e.clientY-d.y0); d.mode=d.hole&&ax>ay*1.2?"swipe":"turn"; if(d.mode==="turn"&&RG.pop) setPop(null,true); }
+      /* within 30° of horizontal = a swipe between Invested / Value / Profit; any steeper angle turns and tilts the ring */
+      if(!d.mode&&d.moved>10){ const ax=Math.abs(e.clientX-d.x0), ay=Math.abs(e.clientY-d.y0); d.mode=ay<=ax*.577?"swipe":"turn"; if(d.mode==="turn"&&RG.pop) setPop(null,true); }
+      if(d.mode==="swipe"){ RG.cb.onSwipeMove&&RG.cb.onSwipeMove(e.clientX-d.x0); return; }
       if(d.mode!=="turn") return;
       /* the finger grabs the near rim: arc length dx on a rim of radius R (px) turns the wheel dx/R radians */
       const Rpx=Math.max(60,holeR()/(RI*.92)*RO), dth=dx/Rpx;
@@ -138,12 +140,12 @@ S.ring=function(host,segs,cb){
       let np=RG.ph+dy*.0065; if(np<TMIN) np=TMIN-(TMIN-np)*.35; if(np>TMAX) np=TMAX+(np-TMAX)*.35; d.vp=d.vp*.6+((np-RG.ph)/dt)*.4; RG.ph=np; });
     const up=e=>{ const d=RG.drag; RG.drag=null; if(!d) return;
       if(d.mode==="turn"){ RG.w=Math.max(-24,Math.min(24,d.vw)); RG.pv=d.vp; return; }
-      if(d.mode==="swipe"){ const dx=e.clientX-d.x0; if(Math.abs(dx)>30&&RG.cb.onSwipe) RG.cb.onSwipe(dx<0?1:-1); return; }
+      if(d.mode==="swipe"){ const dx=e.clientX-d.x0; RG.cb.onSwipeMove&&RG.cb.onSwipeMove(null); if(Math.abs(dx)>40&&RG.cb.onSwipe) RG.cb.onSwipe(dx<0?1:-1); return; }
       if(d.moved<10&&performance.now()-d.t<600){ const m=pick(e);
         if(!m){ if(RG.pop) setPop(null,true); else if(d.hole&&RG.cb.onSwipe) RG.cb.onSwipe(1); return; }
         const cc=m.userData.c; if(RG.pop===cc){ RG.cb.onOpen&&RG.cb.onOpen(cc); } else setPop(cc,true); } };
     c.addEventListener("pointerup",up);
-    c.addEventListener("pointercancel",()=>{ RG.drag=null; });
+    c.addEventListener("pointercancel",()=>{ if(RG.drag&&RG.drag.mode==="swipe"&&RG.cb.onSwipeMove) RG.cb.onSwipeMove(null); RG.drag=null; });
     lab.addEventListener("click",e=>{ const b=e.target.closest("[data-c]"); if(!b) return; const cc=b.dataset.c; if(RG.pop===cc) RG.cb.onOpen&&RG.cb.onOpen(cc); else setPop(cc,true); });
     let last=performance.now();
     const loop=now=>{ if(RG.dead) return; requestAnimationFrame(loop); if(document.hidden||!c.isConnected||!c.offsetParent) return;
@@ -162,7 +164,7 @@ S.ring=function(host,segs,cb){
       RG.orbit.rotation.z-=dt*.25*(calm?0:1); RG.halo2.rotation.z+=dt*.4;
       /* zoom toward the chosen slice */
       RG.zoom+=((RG.pop?1:0)-RG.zoom)*(1-Math.exp(-6*dt));
-      const z=RG.zoom; RG.cam.position.set(0,-.2-.45*z,8.4-1.0*z); RG.cam.lookAt(0,-.3*z,0);
+      const z=RG.zoom; RG.cam.position.set(0,-.2-.45*z,(RG.dist||8.4)-1.0*z); RG.cam.lookAt(0,-.3*z,0);
       const age=(now-RG.t0)/1000;
       RG.meshes.forEach((m,i)=>{ const u=m.userData, kk=calm?1:Math.min(1,Math.max(0,(age-i*.12)/.7)), e=1-Math.pow(1-kk,3);
         const on=RG.pop===u.c, dim=RG.pop&&!on;
@@ -202,8 +204,9 @@ const _v=webgl?new T.Vector3():null;
 function placeLabels(){ if(!RG||!RG.labs.size) return; const W=RG.W, H=RG.H, half=W/2;
   RG.meshes.forEach(m=>{ const el=RG.labs.get(m.userData.c); if(!el) return; const u=m.userData, rr=RO+.42+.5*u.f;
     _v.set(Math.cos(u.mid)*rr,Math.sin(u.mid)*rr,u.depth*.5+.28*u.f); m.parent.localToWorld(_v); _v.project(RG.cam);
-    let x=(_v.x+1)/2*W, y=(1-_v.y)/2*H; const w=el.offsetWidth||80; x=Math.max(w/2+2,Math.min(W-w/2-2,x)); y=Math.max(18,Math.min(H-18,y));
-    el.style.transform=`translate(${x.toFixed(1)}px,${y.toFixed(1)}px) translate(-50%,-50%)`; el.style.zIndex=String(Math.round(100-_v.z*50)); });
+    let x=(_v.x+1)/2*W, y=(1-_v.y)/2*H; /* scale lives in the transform (a CSS "scale" would also scale the translate and push the label past the ring) */
+    const k=1+.22*u.f, w=(el.offsetWidth||80)*k, hh=(el.offsetHeight||50)*k; x=Math.max(w/2+2,Math.min(W-w/2-2,x)); y=Math.max(hh/2+2,Math.min(H-hh/2-4,y));
+    el.style.transform=`translate(${x.toFixed(1)}px,${y.toFixed(1)}px) translate(-50%,-50%) scale(${k.toFixed(3)})`; el.style.zIndex=String(Math.round(100-_v.z*50)); });
   void half; }
 S.ringColor=hex=>{ if(RG&&webgl){ const c=new T.Color(hex); RG.halo.material.color=c; RG.halo2.material.color=c; RG.orbit.material.color=c; } };
 window.Scene3D=S;
