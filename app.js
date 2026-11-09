@@ -1,7 +1,7 @@
-/* Artha 3.2 — investments + insurance. Data lives in the "Artha – My Investments" Google Sheet via the Apps Script API. */
+/* Artha 3.5 — investments + insurance. Data lives in the "Artha – My Investments" Google Sheet via the Apps Script API. */
 (()=>{
 "use strict";
-const APP_VERSION="3.4";
+const APP_VERSION="3.5";
 const PROJECT_URL="https://claude.ai/project/01a1965d-e312-704a-8114-16f0090c8706";
 const $=id=>document.getElementById(id);
 const store={get(k,d){try{const v=localStorage.getItem("artha:"+k);return v==null?d:JSON.parse(v);}catch(e){return d;}},set(k,v){try{localStorage.setItem("artha:"+k,JSON.stringify(v));}catch(e){}}};
@@ -1456,7 +1456,8 @@ function showUpd(){ clearTimeout(updT); if(!UPD) return;
 async function checkUpdate(manual){ try{ const j=await (await fetch("version.json?t="+Date.now(),{cache:"no-store"})).json();
     if(j.v&&j.v!==APP_VERSION){ UPD=j; if(manual||store.get("updLater")!==j.v) showUpd(); } else if(manual) showToast("You're on the latest version"); }
   catch(e){ if(manual) showToast("Couldn't check, you seem to be offline"); } }
-async function doUpdate(){ $("updBtn").textContent="Updating…"; try{ const reg=await navigator.serviceWorker?.getRegistration(); if(reg) await reg.update(); const ks=await caches.keys(); await Promise.all(ks.filter(k=>k.startsWith("artha-")).map(k=>caches.delete(k))); }catch(e){} location.reload(); }
+/* update = drop the old worker and every cached copy, then load fresh from the network (with a cache-busting address) */
+async function doUpdate(){ $("updBtn").textContent="Updating…"; try{ const regs=await navigator.serviceWorker?.getRegistrations?.()||[]; await Promise.all(regs.map(r=>r.scope.includes("/artha")?r.unregister():null)); const ks=await caches.keys(); await Promise.all(ks.filter(k=>k.startsWith("artha-")).map(k=>caches.delete(k))); }catch(e){} location.replace(location.pathname+"?u="+Date.now()+location.hash); }
 $("updBtn").onclick=doUpdate; $("updLater").onclick=()=>{ if(UPD) store.set("updLater",UPD.v); clearTimeout(updT); $("upd").hidden=true; showToast("OK. Menu › Check for updates whenever you're ready"); };
 $("verBtn").onclick=()=>checkUpdate(true); setTimeout(checkUpdate,2500);
 document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="visible"){ checkUpdate(); refresh(); if(Date.now()-CACHE_AT>60000) pull(); } });
