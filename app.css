@@ -606,3 +606,7 @@ html.locked .app,.locked .scr,.locked .sheet,.locked .add,.locked .esheet,.locke
 
 /* serial number on history rows */
 .tx .sn{font-style:normal;font-size:11px;color:var(--muted);margin-right:8px;min-width:22px;display:inline-block;text-align:right;opacity:.8}
+
+/* menu tools */
+.tlbl{display:flex;justify-content:space-between;align-items:baseline;margin:16px 4px 8px;font-size:13px;color:var(--muted);font-weight:600}.tlbl b{font:600 13px var(--mono)}
+#eBox .seg.sm{margin:10px 0 0}#eBox .tlist,#eBox .list{max-height:none;margin-top:12px}

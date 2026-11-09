@@ -32,7 +32,7 @@
 <link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icon-192.png"><link rel="apple-touch-icon" href="icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Sora:wght@400;600;700&display=swap">
-<link rel="stylesheet" href="app.css?v=3.9.5">
+<link rel="stylesheet" href="app.css?v=3.10.0">
 </head>
 <body>
 <canvas id="bg3d" aria-hidden="true"></canvas>
@@ -84,6 +84,10 @@
     <button class="dt" type="button" id="dVals" style="--c:#3CF0D4"><span class="di"><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16zM14 6l4 4"/></svg></span><b>Update values</b><small>What it's worth today</small></button>
     <button class="dt" type="button" id="dNps" style="--c:#FF8A3D"><span class="di"><svg viewBox="0 0 24 24"><path d="M3 18h18M7 18a5 5 0 0 1 10 0M12 8V5M5.6 11.6 3.8 9.8M18.4 11.6l1.8-1.8"/></svg></span><b>NPS</b><small id="dNpsS"></small></button>
     <button class="dt" type="button" id="dIns" style="--c:#B18CFF"><span class="di"><svg viewBox="0 0 24 24"><path d="M12 3 20 6v6c0 4.5-3.4 8.2-8 9-4.6-.8-8-4.5-8-9V6l8-3z"/></svg></span><b>Insurance</b><small id="dInsS"></small></button>
+    <button class="dt" type="button" id="dBal" style="--c:#2BD99F"><span class="di"><svg viewBox="0 0 24 24"><path d="M3 7h18v10H3zM12 9.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5M6 10v.01M18 14v.01"/></svg></span><b>Groww balance</b><small id="dBalS"></small></button>
+    <button class="dt" type="button" id="dRet" style="--c:#3CF0D4"><span class="di"><svg viewBox="0 0 24 24"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/></svg></span><b>Returns by account</b><small id="dRetS"></small></button>
+    <button class="dt" type="button" id="dMov" style="--c:#FF6B8B"><span class="di"><svg viewBox="0 0 24 24"><path d="M7 4v16M3 8l4-4 4 4M17 20V4M13 16l4 4 4-4"/></svg></span><b>Winners and losers</b><small id="dMovS"></small></button>
+    <button class="dt" type="button" id="dUp" style="--c:#FFB547"><span class="di"><svg viewBox="0 0 24 24"><path d="M4 6h16v14H4zM4 10h16M8 3v4M16 3v4"/></svg></span><b>Upcoming money</b><small id="dUpS"></small></button>
     <button class="dt" type="button" id="dTds" style="--c:#FFB547"><span class="di"><svg viewBox="0 0 24 24"><path d="M7 3h7l5 5v13H7zM14 3v5h5M10 14l2 2 4-4"/></svg></span><b>TDS · 26AS</b><small>Verify before your ITR</small></button>
     <button class="dt" type="button" id="dChg" style="--c:#5B8CFF"><span class="di"><svg viewBox="0 0 24 24"><path d="M4 19V5M4 19h16M8 15l3-4 3 2 5-6"/></svg></span><b>Charges</b><small>Exact, year by year</small></button>
     <button class="dt" type="button" id="dInbox" style="--c:#8B7CFF"><span class="di"><svg viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></svg></span><b>Claude inbox</b><small id="dInboxS"></small></button>
@@ -153,7 +157,7 @@
 <div class="toast" id="toast" role="status" hidden></div>
 <input type="file" id="fileIn" hidden multiple>
 <script src="three.min.js" integrity="sha384-CI3ELBVUz9XQO+97x6nwMDPosPR5XvsxW2ua7N1Xeygeh1IxtgqtCkGfQY9WWdHu" defer></script>
-<script src="scene.js?v=3.9.5" defer></script>
-<script src="app.js?v=3.9.5" defer></script>
+<script src="scene.js?v=3.10.0" defer></script>
+<script src="app.js?v=3.10.0" defer></script>
 </body>
 </html>

@@ -1,7 +1,7 @@
 /* Artha 3.9 — investments + insurance. Data lives in the "Artha – My Investments" Google Sheet via the Apps Script API. */
 (()=>{
 "use strict";
-const APP_VERSION="3.9.5";
+const APP_VERSION="3.10.0";
 /* Personal details (banks, platforms, the Claude project link) come from the backend after sign-in, so this public code holds none. */
 const CFG=()=>(typeof DATA!=="undefined"&&DATA&&DATA.cfg)||{};
 const PROJECT_URL=()=>{ const u=safeUrl(CFG().project); return u==="#"?"https://claude.ai/projects":u; };
@@ -872,6 +872,7 @@ function balLedger(u){ const seen=new Set(), L=[];
   M.tx.forEach(t=>{ const r=t.src; if(t.internal||!r||seen.has(t.id)||r.acct!==u.acct||r.who!==u.who) return;
     if(!(r.via==="Balance"||r.asset==="Cash"||r.asset==="F&O")) return; const sg=BALSG[r.type]||0; if(!sg||!r.amount) return; seen.add(t.id); L.push({t,v:sg*r.amount}); });
   L.sort((a,b)=>(a.t.date||"")<(b.t.date||"")?-1:(a.t.date||"")>(b.t.date||"")?1:a.t.i-b.t.i); let b=0; L.forEach(x=>{ b+=x.v; x.b=r2(b); }); return L; }
+const balUnits0=()=>(M.units||[]).filter(u=>u.h==="Stocks").map(u=>({u,L:balLedger(u)})).filter(x=>x.L.length);
 const balUnits=()=>(M.units||[]).filter(u=>u.h==="Stocks"&&(WHO==="all"||u.who===WHO)).map(u=>({u,L:balLedger(u)})).filter(x=>x.L.length);
 function balTitle(t){ const r=t.src, n=r.name?" "+r.name:"", bal=/\[bal\]/.test(r.note||"");
   if(bal) return "Balance corrected";
@@ -1551,10 +1552,57 @@ addEventListener("scroll",upCheck,{passive:true}); $("scrBody").addEventListener
 const ACC=[["","Cyan","#3CF0D4"],["violet","Violet","#A98BFF"],["amber","Amber","#FFB547"],["rose","Rose","#FF6FA8"],["ice","Ice","#7CC8FF"]];
 function segs(id,opts,cur,on){ const el=$(id); el.innerHTML=opts.map(([k,l])=>`<button type="button" data-k="${k}" aria-pressed="${k===cur}">${l}</button>`).join(""); el.querySelectorAll("button").forEach(b=>b.onclick=()=>{ on(b.dataset.k); buildDrawer(); }); }
 function setCalm(on){ store.set("calm",on); document.documentElement.classList.toggle("calm",on); if(S3.setCalm) S3.setCalm(on); refresh(); }
+/* ---------- menu tools: returns by account, winners & losers, upcoming money ---------- */
+const whoAcct=u=>u.acct+(u.who!==holderOf(u.acct)?` · ${u.who}'s money`:"");
+function toolReturns(){ const U=M.units.filter(u=>u.h!=="Others"&&u.h!=="Term"&&(u.cur>0||u.net>0)&&okWho(u.who,WHO)).sort((a,b)=>(b.x??-9)-(a.x??-9));
+  const G=["Stocks","Mutual Funds","Bonds","Other"].filter(h=>U.some(u=>u.h===h));
+  openE(`<div class="t big">Returns by account</div><div class="s" style="text-align:left">XIRR is the yearly return on your own money, counting when each rupee went in and came out.</div>
+    ${G.map(h=>{ const r=agg(h,WHO); return `<div class="tlbl"><span>${esc(CLS[h].label)}</span><b class="num ${cls(r.x)}">XIRR ${pct(r.x)}</b></div><div class="list tlist">${U.filter(u=>u.h===h).map(u=>{ const g=u.gain!=null&&u.net>0?u.gain/u.net:null;
+      return `<div class="hl"><span class="av" style="background:${CLS[h].col}">${svgI(CLS[h].icon,"#fff",18)}</span><div style="min-width:0"><div class="n">${esc(whoAcct(u))}</div><div class="m">Put in ${money(u.net)} · now ${money(u.cur)}</div></div><div class="r"><b class="num ${cls(u.x)}">${pct(u.x)}</b><small class="${cls(u.gain)}">${u.gain==null?"—":smoney(u.gain,true)}${g!=null?" · "+pct(g):""}</small></div></div>`; }).join("")}</div>`; }).join("")}
+    <p class="hint">Bonds: XIRR counts repayments still to come.</p>${closeBtn}`); }
+function toolMovers(){ let sort=store.get("mvSort","loss"), grp=store.get("mvGrp","Stocks");
+  const fb=new Map(); M.rows.forEach(r=>{ if(r.type!=="Buy"||!r.date) return; const k=r.acct+"|"+r.who+"|"+r.asset+"|"+(r.asset==="Mutual Funds"?keyName(r.name):nkey(r.name)); if(!fb.has(k)||r.date<fb.get(k)) fb.set(k,r.date); });
+  const draw=()=>{ const H=M.hold.filter(h=>h.a===grp&&okWho(h.who,WHO)&&h.inv>0).map(h=>({h,g:h.gain,p:h.gain/h.inv,since:fb.get(h.key)||""}));
+    H.sort((a,b)=>sort==="loss"?a.p-b.p:sort==="gain"?b.p-a.p:b.g-a.g);
+    const tg=SUM(H,x=>x.g);
+    openE(`<div class="t big">Winners and losers</div>
+      <div class="seg sm" id="mvG">${["Stocks","Mutual Funds"].map(g=>`<button type="button" data-v="${g}" aria-pressed="${g===grp}">${esc(CLS[g].label)}</button>`).join("")}</div>
+      <div class="seg sm" id="mvS">${[["loss","Worst first"],["gain","Best first"],["amt","Biggest ₹"]].map(([v,l])=>`<button type="button" data-v="${v}" aria-pressed="${v===sort}">${l}</button>`).join("")}</div>
+      <div class="s" style="text-align:left">${H.length} holdings · ${H.filter(x=>x.g<0).length} below cost · total ${smoney(tg,true)}</div>
+      <div class="list">${H.map(({h,g,p,since})=>{ const y=since?days(since,M.today)/365:0;
+        return `<div class="hl"><span class="av" style="background:${h.col||CLS[grp].col}">${esc((h.name||"?")[0])}</span><div style="min-width:0"><div class="n">${esc(h.name)}</div><div class="m">${esc(whoAcct(h).replace(/^Groww · /,"Groww "))} · cost ${money(h.inv,true)}${since?` · held ${y>=1?y.toFixed(1)+" yr":Math.round(y*12)+" mo"}${grp==="Stocks"?(y>=1?" · LT":" · ST"):""}`:""}</div></div><div class="r"><b class="num ${cls(g)}">${smoney(g,true)}</b><small class="${cls(p)}">${pct(p)}</small></div></div>`; }).join("")||`<div class="empty">No holdings.</div>`}</div>
+      <p class="hint">Prices from the latest value or trade in Artha${grp==="Mutual Funds"?" (NAVs refresh daily)":""}. LT = held over a year.</p>${closeBtn}`);
+    $("mvG").onclick=e=>{ const b=e.target.closest("button"); if(b){ grp=b.dataset.v; store.set("mvGrp",grp); draw(); } };
+    $("mvS").onclick=e=>{ const b=e.target.closest("button"); if(b){ sort=b.dataset.v; store.set("mvSort",sort); draw(); } }; };
+  draw(); }
+function upcomingList(n){ const lim=addDays(M.today,n), L=[];
+  bondsFor(WHO).filter(b=>!b.closed).forEach(b=>b.open.forEach(e=>{ if(e.d<=lim) L.push({d:e.d,k:"in",t:b.name,s:`${e.p>0?"Principal + interest":"Interest"} · ${whoAcct(b)}`,a:e.a,late:e.d<M.today}); }));
+  /* SIPs: a fund bought in each of the last two months → next one a month after the last */
+  const F=new Map(); M.tx.filter(t=>t.asset==="Mutual Funds"&&t.type==="Buy"&&t.date&&t.date>=addDays(M.today,-70)&&okWho(t.who,WHO)).forEach(t=>{ const k=t.acct+"|"+t.who+"|"+keyName(t.name); if(!F.has(k)) F.set(k,[]); F.get(k).push(t); });
+  for(const T of F.values()){ T.sort((a,b)=>a.date<b.date?-1:1); const months=new Set(T.map(t=>t.date.slice(0,7))); if(months.size<2) continue; const lt=T[T.length-1]; let nd=addMonths(lt.date,1);
+    while(nd<M.today) nd=addMonths(nd,1); for(;nd<=lim;nd=addMonths(nd,1)) L.push({d:nd,k:"out",t:lt.name,s:`SIP (expected) · ${whoAcct(lt)}`,a:lt.show}); }
+  /* ELSS 3-year lock-in ends */
+  M.tx.filter(t=>t.asset==="Mutual Funds"&&t.type==="Buy"&&/elss|tax saver/i.test(t.name||"")&&t.date&&okWho(t.who,WHO)).forEach(t=>{ const d=addMonths(t.date,36); if(d>=M.today&&d<=lim) L.push({d,k:"free",t:t.name,s:`ELSS lock-in ends · bought ${fmtDs(t.date)}`,a:t.show}); });
+  if(M.term&&okWho("Aditya",WHO)){ const np=nextPremium(M.term); if(np&&np.date<=lim) L.push({d:np.date,k:"out",t:"Term premium",s:`${np.left} left after this`,a:np.amt,late:np.date<M.today}); }
+  renewals(n).forEach(x=>L.push({d:x.end,k:"out",t:(x.pol.d.title||"Policy")+" renewal",s:x.pol.d.insured||"",a:0,late:x.left<0}));
+  return L.sort((a,b)=>a.d<b.d?-1:1); }
+function toolUpcoming(){ let n=store.get("upN",90);
+  const draw=()=>{ const L=upcomingList(n), tin=SUM(L.filter(x=>x.k==="in"),x=>x.a), tout=SUM(L.filter(x=>x.k==="out"),x=>x.a), lab={in:"Money in",out:"Money out",free:"Unlocks"}, col={in:"var(--gain,#2BD99F)",out:"#FFB547",free:"#5B8CFF"};
+    openE(`<div class="t big">Upcoming money</div>
+      <div class="seg sm" id="upN">${[30,90,365].map(v=>`<button type="button" data-v="${v}" aria-pressed="${v===n}">${v===365?"1 year":v+" days"}</button>`).join("")}</div>
+      <div class="s" style="text-align:left">Coming in ${money(tin,true)} · going out ${money(tout,true)}</div>
+      <div class="list">${L.map(x=>`<div class="hl"><span class="av" style="background:${col[x.k]}">${esc(fmtDs(x.d).split(" ")[0])}</span><div style="min-width:0"><div class="n">${esc(x.t)}</div><div class="m">${x.late?'<span class="loss">Due</span> · ':""}${esc(fmtDs(x.d))} · ${esc(x.s)}</div></div><div class="r"><b class="num">${x.a?(x.k==="out"?"−":"")+money(x.a,true):"—"}</b><small>${lab[x.k]}</small></div></div>`).join("")||`<div class="empty">Nothing in this window.</div>`}</div>
+      <p class="hint">SIPs are guessed from the last two months of buys.</p>${closeBtn}`);
+    $("upN").onclick=e=>{ const b=e.target.closest("button"); if(b){ n=+b.dataset.v; store.set("upN",n); draw(); } }; };
+  draw(); }
 function buildDrawer(){
   const nps=M?agg("Others","all"):null, wait=M?recs("inbox").filter(r=>r.d.status==="new").length:0, ready=M?recs("inbox").filter(r=>r.d.status==="ready").length:0;
   $("dNpsS").textContent=nps&&nps.U.length?money(nps.cur,true).replace(/<[^>]+>/g,"")+" · not in totals":"Not set up";
   $("dInboxS").textContent=ready?`${ready} ready to check`:wait?`${wait} waiting`:"Nothing waiting";
+  const bx=M?balUnits0().filter(x=>/groww/i.test(x.u.acct)):[];
+  $("dBalS").textContent=bx.length?bx.map(x=>(x.u.acct.split(" · ")[1]||x.u.acct)+" "+rsx(x.L[x.L.length-1].b)).join(" · "):"No balance yet";
+  if(M){ const r=agg("Stocks",WHO), up=upcomingList(30); $("dRetS").textContent="Stocks XIRR "+pct(r.x); $("dUpS").textContent=up.length?`${up.length} in the next 30 days`:"Nothing in 30 days";
+    const lo=M.hold.filter(h=>okWho(h.who,WHO)&&h.inv>0&&h.gain<0).length; $("dMovS").textContent=`${lo} below cost`; }
   $("dInsS").textContent=M?`${policies().length} polic${policies().length===1?"y":"ies"}`:"";
   segs("fAmt",[["short","Short ₹12.3L"],["full","Full ₹12,34,567"]],SHORT?"short":"full",v=>{ SHORT=v==="short"; store.set("amt",v); refresh(); });
   segs("fMotion",[["full","3D and motion"],["calm","Simple and still"]],store.get("calm",false)?"calm":"full",v=>setCalm(v==="calm"));
@@ -1569,6 +1617,8 @@ const fromDrawer=fn=>()=>{ ov.back(); setTimeout(fn,240); };
 $("menuBtn").onclick=openDrawer; $("drawerDone").onclick=()=>ov.back(); $("scrim").onclick=()=>ov.back();
 $("dVals").onclick=fromDrawer(()=>openValues());
 $("dTds").onclick=fromDrawer(()=>openScr("Bonds",{tab:"TDS"}));
+$("dBal").onclick=fromDrawer(()=>openScr("Stocks",{tab:"Balance"}));
+$("dRet").onclick=fromDrawer(toolReturns); $("dMov").onclick=fromDrawer(toolMovers); $("dUp").onclick=fromDrawer(toolUpcoming);
 $("dChg").onclick=fromDrawer(()=>openScr("Stocks",{tab:"Charges"}));
 $("dNps").onclick=fromDrawer(()=>{ if(agg("Others","all").U.length) openScr("NPS"); else showToast("No NPS entries yet. Add one with the + button."); });
 $("dIns").onclick=fromDrawer(()=>setTab("ins"));
