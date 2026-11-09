@@ -1,7 +1,7 @@
-/* Artha 3.1 — investments + insurance. Data lives in the "Artha – My Investments" Google Sheet via the Apps Script API. */
+/* Artha 3.2 — investments + insurance. Data lives in the "Artha – My Investments" Google Sheet via the Apps Script API. */
 (()=>{
 "use strict";
-const APP_VERSION="3.1";
+const APP_VERSION="3.2";
 const PROJECT_URL="https://claude.ai/project/01a1965d-e312-704a-8114-16f0090c8706";
 const $=id=>document.getElementById(id);
 const store={get(k,d){try{const v=localStorage.getItem("artha:"+k);return v==null?d:JSON.parse(v);}catch(e){return d;}},set(k,v){try{localStorage.setItem("artha:"+k,JSON.stringify(v));}catch(e){}}};
@@ -93,8 +93,9 @@ const CLS={
   Bonds:{label:"Bonds & FDs",icon:"bond",col:"#FFB547"},
   NPS:{label:"NPS",icon:"nps",col:"#FF8A3D"},
   Others:{label:"NPS",icon:"nps",col:"#FF8A3D"},
-  Term:{label:"Term insurance",icon:"term",col:"#B18CFF"}};
-const HOME=["Stocks","Mutual Funds","Bonds"];   // NPS and term insurance are never in a total
+  Term:{label:"Term insurance",icon:"term",col:"#B18CFF"},
+  Other:{label:"Other investments",icon:"other",col:"#E86CC8"}};
+const HOME=["Stocks","Mutual Funds","Bonds","Other"];   // NPS and term insurance are never in a total
 const AVC=["#5B8CFF","#2EE6B0","#FF6B8B","#8B7CFF","#FFB547","#35C4F0","#E86CC8","#7BDB5A","#D99A6C","#9A8CFF"];
 const initials=s=>{ const w=String(s).replace(/\b(ltd|limited|fund|direct|growth|plan|the|of|india)\b/gi,"").trim().split(/\s+/).filter(Boolean); return w.length>1?(w[0][0]+w[1][0]).toUpperCase():(w[0]||"•").slice(0,2).toUpperCase(); };
 const avColor=s=>{ let h=0; for(const ch of String(s)) h=(h*31+ch.charCodeAt(0))>>>0; return AVC[h%AVC.length]; };
@@ -106,13 +107,13 @@ const prettyAcct=a=>/ · /.test(a||"")?String(a).replace(" · "," (")+")":String
 const keyName=s=>String(s).toLowerCase().replace(/[^a-z0-9 ]/g," ").split(/\s+/).filter(w=>w&&!/^(fund|direct|growth|plan|regular|option|the|idcw|ltd|limited)$/.test(w)).slice(0,4).join(" ");
 const nkey=s=>String(s||"").toUpperCase().replace(/[^A-Z0-9]+/g," ").trim();
 /* which home group an entry belongs to */
-function homeOfRow(asset){ return asset==="Mutual Funds"?"Mutual Funds":asset==="Bonds"||asset==="FD"?"Bonds":asset==="NPS"?"Others":asset==="Insurance"?"Term":"Stocks"; }
+function homeOfRow(asset){ return asset==="Mutual Funds"?"Mutual Funds":asset==="Bonds"||asset==="FD"||asset==="Fixed income"?"Bonds":asset==="Other"?"Other":asset==="NPS"?"Others":asset==="Insurance"?"Term":"Stocks"; }
 const OUTT=new Set(["Withdraw","Sell","Redeem","Payout","Charges"]);
 let DATA=store.get("cache",null), CACHE_AT=store.get("cacheAt",0), OUT=store.get("outbox",[]), SNZ=store.get("snz",{});
 let M=null, WHO=store.get("who","all"); if(!["all","Aditya","Spardha"].includes(WHO)) WHO="all";
 const saveOut=()=>store.set("outbox",OUT);
-const DUE_RE=/\s*\[due (\d{4}-\d{2}-\d{2})\]/, TDS_RE=/\s*\[tds ([\d.]+)\]/, NET_RE=/\s*\[net ([\d.]+)\]/, PR_RE=/\s*\[p ([\d.]+)\]/;
-const cleanNote=n=>String(n||"").replace(DUE_RE,"").replace(TDS_RE,"").replace(NET_RE,"").replace(PR_RE,"").trim();
+const BANK_RE=/\s*\[bank ([^\]]+)\]/, FY_RE=/\s*\[fy (\d{4})\]/, DUE_RE=/\s*\[due (\d{4}-\d{2}-\d{2})\]/, TDS_RE=/\s*\[tds ([\d.]+)\]/, NET_RE=/\s*\[net ([\d.]+)\]/, PR_RE=/\s*\[p ([\d.]+)\]/;
+const cleanNote=n=>String(n||"").replace(BANK_RE,"").replace(FY_RE,"").replace(DUE_RE,"").replace(TDS_RE,"").replace(NET_RE,"").replace(PR_RE,"").trim();
 
 /* records (insurance, bond schedules, inbox) — server copy + changes waiting to sync */
 function recMap(){ const R=new Map(); ((DATA&&DATA.rec)||[]).forEach(r=>R.set(r[0],{id:r[0],kind:r[1],d:r[2]||{}}));
@@ -164,6 +165,7 @@ function build(){
       note:r.note,note2:cleanNote(r.note),row:r.row,pending:r.pending,src:r},extra||{});
     if((r.asset==="Stocks"||r.asset==="US Stocks")&&(r.type==="Buy"||r.type==="Sell")&&r.qty) t.trade={side:r.type==="Buy"?"B":"S",qty:r.qty,price:r.price||(r.qty?r.amount/r.qty:0)};
     if(r.asset==="Mutual Funds"&&r.qty) t.units=r.qty;
+    t.bank=(BANK_RE.exec(r.note||"")||[])[1]||""; t.fy=(FY_RE.exec(r.note||"")||[])[1]||"";
     t.due=(DUE_RE.exec(r.note||"")||[])[1]||""; t.tds=+((TDS_RE.exec(r.note||"")||[])[1]||0); t.net=+((NET_RE.exec(r.note||"")||[])[1]||0); t.pr=+((PR_RE.exec(r.note||"")||[])[1]||0);
     tx.push(t); const u=U(r.acct,r.who,h); u.T.push(t); return t; };
   const term=[];
@@ -197,7 +199,7 @@ function build(){
   hold.forEach((h,i)=>{ h.i=i; h.gain=h.cur-h.inv; });
   /* bonds and FDs: buys + payouts in the ledger, schedule in Records */
   const B=new Map(), bk=t=>t.acct+"|"+t.name;
-  tx.filter(t=>t.a==="Bonds"&&t.type==="Buy").forEach(t=>{ let b=B.get(bk(t)); if(!b){ b={key:bk(t),cat:t.cat,acct:t.acct,name:t.name||"Bond",who:t.who,plat:t.p0,platL:prettyAcct(t.acct),fd:t.asset==="FD",rows:[],reps:[],cost:0,date:t.date}; B.set(b.key,b); }
+  tx.filter(t=>t.a==="Bonds"&&t.type==="Buy").forEach(t=>{ let b=B.get(bk(t)); if(!b){ b={key:bk(t),cat:t.cat,acct:t.acct,name:t.name||"Bond",who:t.who,plat:t.p0,platL:prettyAcct(t.acct),fd:t.asset==="FD"||t.asset==="Fixed income",rows:[],reps:[],cost:0,date:t.date}; B.set(b.key,b); }
     b.rows.push(t); b.cost+=t.show; if(t.date<b.date) b.date=t.date; });
   tx.filter(t=>t.a==="Bonds"&&t.type==="Payout").forEach(t=>{ const b=B.get(bk(t)); if(b) b.reps.push(t); });
   for(const b of B.values()){
@@ -216,6 +218,9 @@ function build(){
     if(u.h==="Stocks"||u.h==="Mutual Funds"){ const H=hold.filter(x=>x.tab===u.tab); u.cur=SUM(H,x=>x.cur)+(u.h==="Stocks"?Math.max(0,u.cash):0);
       if(H.length||u.cash){ u.valued=true; u.src="holdings"; u.asof=H.map(x=>x.date).sort().pop()||today; } }
     else if(u.h==="Bonds") u.cur=SUM(bonds.filter(b=>b.cat===u.tab&&!b.closed),b=>b.left);
+    else if(u.h==="Other"&&!u.V.length){ /* rate-based items grow on their own; the rest stay at cost until a value is added */
+      let cur=0, rated=false; othItemsOf(u,rec,today).forEach(it=>{ cur+=it.cur; if(it.rate) rated=true; });
+      u.cur=Math.max(0,cur); if(rated){ u.valued=true; u.asof=today; u.src="accrued"; } }
     else { u.cur=Math.max(0,u.net); const lv=u.V[u.V.length-1]; if(lv){ const since=SUM(u.T.filter(t=>t.date>lv.date),t=>t.amt); u.cur=Math.max(0,lv.amount+since); u.valued=true; u.asof=lv.date; u.src="value"; u.lv=lv; } }
     if(u.valued){ u.gain=u.cur-u.net; u.flows=u.T.filter(t=>t.date&&t.amt).map(t=>[t.date,-t.amt]).concat([[today,u.cur]]); u.x=xirr(u.flows); }
   }
@@ -224,6 +229,12 @@ function build(){
   M={units:ul,tx,hold,bonds,today,rec,accts,url:D.url||"",gid:D.gid||0,files:D.files||"",term:term.length?{name:"Term plan",T:term}:null,v3:D===DATA,rows};
 }
 
+/* "Other" items inside one unit, each with its own rate from its record */
+function othItemsOf(u,rec,today){ const m=new Map(); u.T.forEach(t=>{ const k=t.name||"Other"; if(!m.has(k)) m.set(k,[]); m.get(k).push(t); });
+  return [...m.entries()].map(([name,L])=>{ const R=rec.get("oth:"+u.acct+"|"+name), d=R?R.d:{}, end=d.end&&d.end<today?d.end:today, r=(+d.rate||0)/100, n={y:1,q:4,m:12,s:0}[d.comp||"y"];
+    let cur=0, put=0, back=0; L.forEach(t=>{ if(t.amt>0) put+=t.amt; else back-=t.amt; if(t.type==="Payout") return;
+      const yrs=t.date?Math.max(0,days(t.date,end))/365:0, g=r>0?(n?Math.pow(1+r/n,n*yrs):1+r*yrs):1; cur+=t.amt*g; });
+    return {name,acct:u.acct,who:u.who,T:L,put,back,cur:Math.max(0,cur),rate:+d.rate||0,comp:d.comp,end:d.end||"",ret:d.ret||"",first:first(L)}; }); }
 const okWho=(w,who)=>!who||who==="all"||w===who;
 function agg(h,who){
   const U=M.units.filter(u=>u.h===h&&okWho(u.who,who));
@@ -270,7 +281,10 @@ function totals(who){ const G=homeGroups(who), R=G.map(x=>x.r);
   const f=[]; R.forEach(r=>{ if(r.h==="Bonds"){ bondsFor(who||WHO).forEach(b=>{ b.rows.concat(b.reps).forEach(t=>{ if(t.date) f.push([t.date,-t.amt]); }); b.open.forEach(e=>{ if(e.a>0) f.push([e.d>M.today?e.d:M.today,e.a]); }); }); }
     else r.U.forEach(u=>{ if(u.valued) f.push(...u.flows); }); });
   return {G,put,cur,gain,has:gs.length>0,x:xirr(f),egain:SUM(R,r=>r.egain||0)}; }
-const SCOPEL={all:"Overall",Stocks:"Stocks","Mutual Funds":"Funds",Bonds:"Bonds"}, SCOPEF={all:"Overall",Stocks:"Stocks","Mutual Funds":"Mutual funds",Bonds:"Bonds"};
+const SCOPEL={all:"Overall",Stocks:"Stocks","Mutual Funds":"Mutual Funds",Bonds:"Bonds",Other:"Other"}, SCOPEF={all:"Overall",Stocks:"Stocks","Mutual Funds":"Mutual Funds",Bonds:"Bonds",Other:"Other investments"};
+/* whole-number shares that always add up to 100 (largest remainder) */
+function pct100(vals){ const tot=vals.reduce((a,v)=>a+Math.max(0,v),0); if(!tot) return vals.map(()=>0); const raw=vals.map(v=>Math.max(0,v)/tot*100), fl=raw.map(Math.floor); let left=100-fl.reduce((a,b)=>a+b,0);
+  raw.map((r,i)=>[r-fl[i],i]).sort((a,b)=>b[0]-a[0]).forEach(([,i])=>{ if(left>0&&raw[i]>0){ fl[i]++; left--; } }); return fl; }
 function figOf(T,sc){ if(sc==="all") return {put:T.put,cur:T.cur,gain:T.gain,has:T.has,x:T.x};
   const g=T.G.find(x=>x.h===sc); if(!g) return {put:0,cur:0,gain:0,has:false,x:null}; const r=g.r, bond=sc==="Bonds";
   return {put:r.put,cur:r.cur,gain:bond?(r.egain||0):(r.gain||0),has:bond||r.gain!=null,x:r.x,bond}; }
@@ -279,8 +293,8 @@ function tween(el,key,to,fmt){ const from=key in LAST?LAST[key]:to; LAST[key]=to
   el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash");
   const t0=performance.now(), d=600; const step=now=>{ const k=Math.min(1,(now-t0)/d), e=1-Math.pow(1-k,3); el.innerHTML=fmt(from+(to-from)*e); if(k<1&&el.isConnected) requestAnimationFrame(step); }; requestAnimationFrame(step); }
 function paintHero(){ const T=totals(); if(SCOPE!=="all"&&!T.G.some(x=>x.h===SCOPE)) SCOPE="all";
-  const f=figOf(T,SCOPE), nm=SCOPE==="all"?"":SCOPEF[SCOPE]+" · ", whose=WHO==="all"?"Everyone's":WHO+"'s";
-  $("f0").innerHTML=`<small>${nm}Invested</small><b class="num" id="fv0"></b><i>${DATA?`${whose} money put in`:"Loading…"}</i>`;
+  const f=figOf(T,SCOPE), nm=SCOPE==="all"?"":SCOPEF[SCOPE]+" · ", whose=WHO==="all"?"Total":WHO+"'s";
+  $("f0").innerHTML=`<small>${nm}Invested</small><b class="num" id="fv0"></b><i>${DATA?(WHO==="all"?"Total money put in together":`${whose} money put in`):"Loading…"}</i>`;
   $("f1").innerHTML=`<small>${nm}Value today</small><b class="num" id="fv1"></b><i>${f.has?"What it's worth now":"Shown at cost until you add a value"}</i>`;
   $("f2").innerHTML=`<small>${nm}${f.bond?"Expected profit":"Profit"}</small><b class="num ${cls(f.gain)}" id="fv2"></b><i>${f.x!=null?"Growing about "+pct(f.x).replace("+","")+" a year":f.bond?"Interest still to come":"Add today's value to see it"}</i>`;
   const plain=n=>HIDE?"₹••••":esc(rs(n,false)), signed=n=>HIDE?"₹••••":esc((n>0?"+":"")+rs(n,false));
@@ -290,22 +304,29 @@ function showFace(){ document.querySelectorAll("#faces .fc").forEach((el,k)=>{ e
   $("meas").querySelectorAll("button").forEach((b,k)=>b.setAttribute("aria-pressed",String(k===FACE))); }
 function setFace(i){ const n=(i+3)%3; if(n===FACE) return; FACE=n; showFace(); drawTiles(); }
 function setScope(s){ if(s===SCOPE&&s!=="all"){ openScr(s); return; } SCOPE=s; paintHero(); drawTiles(); ringFocus(); }
+function ringPop(c){ SCOPE=c||"all"; paintHero(); drawTiles(); }
 function ringFocus(){ if(S3.ringFocus) S3.ringFocus(SCOPE==="all"?null:SCOPE); document.querySelectorAll("#stage svg.flat [data-c]").forEach(n=>n.style.opacity=SCOPE==="all"||n.dataset.c===SCOPE?1:.22); }
 function drawTiles(){ const T=totals(), keys=["all"].concat(T.G.map(g=>g.h)), cols=`repeat(${keys.length},minmax(0,1fr))`, base=FACE===0?T.put:T.cur;
   const colOf=k=>k==="all"?"var(--neon)":CLS[k].col;
   $("scope").style.gridTemplateColumns=cols; $("legend").style.gridTemplateColumns=cols;
   $("scope").innerHTML=keys.map(k=>`<button data-s="${k}" aria-pressed="${SCOPE===k}" style="--c:${colOf(k)}" aria-label="${SCOPEL[k]}"></button>`).join("");
-  $("legend").innerHTML=keys.map(k=>{ const f=figOf(T,k), v=FACE===0?f.put:FACE===1?f.cur:f.gain, share=k==="all"?"":FACE===2?(f.bond?"expected":""):base?Math.round(v/base*100)+"%":"";
+  const P=pct100(keys.slice(1).map(k=>{ const f=figOf(T,k); return FACE===0?f.put:f.cur; }));
+  $("legend").innerHTML=keys.map((k,ki)=>{ const f=figOf(T,k), v=FACE===0?f.put:FACE===1?f.cur:f.gain, share=k==="all"?(FACE===2?"":"100%"):FACE===2?(f.bond?"expected":""):base?P[ki-1]+"%":"";
     return `<button class="lg" data-s="${k}" aria-pressed="${SCOPE===k}" style="--c:${colOf(k)}"><small>${SCOPEL[k]}</small><b class="num ${FACE===2?cls(v):""}">${FACE===2?smoney(v,true):money(v,true)}</b><i>${share||"&nbsp;"}</i></button>`; }).join("");
-  $("homeOpen").innerHTML=SCOPE==="all"?`<p class="hint">Swipe the number for value and profit · tap a box to see just that</p>`:`<button class="btn2 wide" id="openSc" style="border-color:${colOf(SCOPE)}">Open ${SCOPEF[SCOPE]} ›</button>`;
+  $("homeOpen").innerHTML=SCOPE==="all"?`<p class="hint">Swipe the number or the ring's centre for value and profit · spin, tilt or tap a slice</p>`:`<button class="btn2 wide" id="openSc" style="border-color:${colOf(SCOPE)}">Open ${SCOPEF[SCOPE]} ›</button>`;
   const o=$("openSc"); if(o) o.onclick=()=>openScr(SCOPE);
-  document.querySelectorAll("#legend [data-s],#scope [data-s]").forEach(b=>b.onclick=()=>setScope(b.dataset.s)); }
+  document.querySelectorAll("#legend [data-s],#scope [data-s]").forEach(b=>b.onclick=()=>setScope(b.dataset.s)); ringLabels(T); }
 function flatRing(G){ const tot=SUM(G,x=>x.r.cur)||1, R=72, C=2*Math.PI*R; let off=0;
   return `<svg class="flat" viewBox="0 0 220 170" aria-hidden="true"><circle cx="110" cy="85" r="${R}" fill="none" stroke="rgba(255,255,255,.06)" stroke-width="22"/>${G.map(({h,r})=>{ const L=r.cur/tot*C; const s=`<circle cx="110" cy="85" r="${R}" fill="none" stroke="${CLS[h].col}" stroke-width="22" stroke-dasharray="${Math.max(0,L-2)} ${C}" stroke-dashoffset="${-off}" transform="rotate(-90 110 85)" data-c="${h}" style="cursor:pointer;transition:opacity .3s"/>`; off+=L; return s; }).join("")}</svg>`; }
-function drawRing(){ const T=totals(), st=$("stage"), G=T.G.filter(x=>x.r.cur>0), segs=G.map(({h,r})=>({c:h,v:r.cur,col:CLS[h].col}));
+function ringSegs(T){ const G=T.G.filter(x=>x.r.cur>0), base=G.map(({h})=>{ const f=figOf(T,h); return FACE===0?f.put:f.cur; }), P=pct100(base);
+  return G.map(({h},i)=>{ const f=figOf(T,h), v=FACE===0?f.put:FACE===1?f.cur:f.gain;
+    return {c:h,v:base[i],col:CLS[h].col,name:esc(SCOPEL[h]),val:FACE===2?smoney(v,true):money(v,true),share:FACE===2?(f.x!=null?pct(f.x)+" a yr":""):P[i]+"%"}; }); }
+const RINGCB={onPop:c=>ringPop(c),onOpen:c=>openScr(c),onSwipe:d=>setFace(FACE+d)};
+function ringLabels(T){ const st=$("stage"); if(S3.ok&&!calm()&&st.querySelector("canvas.ring3d")) S3.ring(st,ringSegs(T||totals()),RINGCB); }
+function drawRing(){ const T=totals(), st=$("stage"), G=T.G.filter(x=>x.r.cur>0);
   const use3d=S3.ok&&!calm(); st.classList.toggle("flatmode",!use3d);
   const fl=st.querySelector("svg.flat"); if(fl) fl.remove();
-  if(use3d) S3.ring(st,segs,c=>openScr(c));
+  if(use3d) S3.ring(st,ringSegs(T),RINGCB);
   else { st.insertAdjacentHTML("beforeend",flatRing(G)); st.querySelectorAll("svg.flat [data-c]").forEach(n=>n.onclick=()=>openScr(n.dataset.c)); }
   paintHero(); drawTiles(); ringFocus(); }
 function catLines(h,who,max){
@@ -315,12 +336,12 @@ function catLines(h,who,max){
 function drawList(){
   const el=$("ledger"), G=homeGroups(), tot=SUM(G,x=>x.r.cur);
   if(!G.length){ el.innerHTML=`<div class="empty">${DATA?"Nothing here yet.":"Loading your investments…"}</div>`; return; }
-  const W=WHOS.map(w=>({w,v:SUM(HOME,h=>agg(h,w).cur)})), wt=SUM(W,x=>x.v)||1;
-  let h=`<div class="grp">`+(WHO==="all"?`<div class="splits"><div class="split"><div class="lab">${W.map(x=>`<span>${x.w} <b class="num">${money(x.v,true)}</b> · ${Math.round(x.v/wt*100)}%</span>`).join("")}</div>
+  const W=WHOS.map(w=>({w,v:SUM(HOME,h=>agg(h,w).cur)})), wt=SUM(W,x=>x.v)||1, WP=pct100(W.map(x=>x.v)), GP=pct100(G.map(x=>x.r.cur));
+  let h=`<div class="grp">`+(WHO==="all"?`<div class="splits"><div class="split"><div class="lab">${W.map(x=>`<span>${x.w} <b class="num">${money(x.v,true)}</b> · ${WP[WHOS.indexOf(x.w)]}%</span>`).join("")}</div>
     <div class="bar">${W.map(x=>`<i style="width:${x.v/wt*100}%;background:${WHOC[x.w]}"></i>`).join("")}</div></div></div>`:"");
-  G.forEach(({h:k,r})=>{ const c=CLS[k], open=OPENC.has(k), L2=catLines(k,WHO,5), gp=r.gain!=null&&r.base>0?r.gain/r.base:null;
+  G.forEach(({h:k,r},gi)=>{ const c=CLS[k], open=OPENC.has(k), L2=catLines(k,WHO,5), gp=r.gain!=null&&r.base>0?r.gain/r.base:null;
     h+=`<div class="cat" data-c="${k}" aria-expanded="${open}"><button aria-expanded="${open}"><svg class="chev" viewBox="0 0 14 14"><path d="M3 5l4 4 4-4"/></svg><span class="cic">${svgI(c.icon,c.col)}</span>
-      <span class="cname"><span>${c.label}<span class="sub">${money(r.put,true)} put in · ${tot?Math.round(r.cur/tot*100):0}% of value</span></span>${L2.n?`<span class="badge num">${L2.n}</span>`:""}</span>
+      <span class="cname"><span>${c.label}<span class="sub">${money(r.put,true)} put in · ${tot?GP[gi]:0}% of value</span></span>${L2.n?`<span class="badge num">${L2.n}</span>`:""}</span>
       <span class="amt num">${money(r.cur,true)}${r.gain!=null?`<small class="${cls(r.gain)}">${smoney(r.gain,true)}${gp!=null?" · "+pct(gp):""}</small>`:""}</span></button>
       ${open?`<div style="padding-left:14px">${L2.html}<button class="more" data-open="${k}">Open ${c.label} ›</button></div>`:""}</div>`; });
   el.innerHTML=h+`</div>`;
@@ -336,10 +357,13 @@ function renderHome(){
   if(list) drawList(); else drawRing(); paintBell();
 }
 $("segv").onclick=e=>{ const b=e.target.closest("button"); if(!b) return; VIEW=b.id==="viewList"?"list":"chart"; store.set("view",VIEW); renderHome(); };
-(()=>{ const h=$("hero"); let x0=null,y0=null,sw=0;
-  h.addEventListener("touchstart",e=>{ x0=e.touches[0].clientX; y0=e.touches[0].clientY; },{passive:true});
-  h.addEventListener("touchend",e=>{ if(x0==null) return; const dx=e.changedTouches[0].clientX-x0, dy=e.changedTouches[0].clientY-y0; x0=null;
-    if(Math.abs(dx)>36&&Math.abs(dx)>Math.abs(dy)*1.2){ sw=Date.now(); setFace(FACE+(dx<0?1:-1)); } });
+(()=>{ const h=$("hero"), fc=$("faces"); let x0=null,y0=null,sw=0;
+  /* the figure follows the finger, then snaps to the next one */
+  h.addEventListener("pointerdown",e=>{ if(e.target.closest("#meas")) return; x0=e.clientX; y0=e.clientY; });
+  h.addEventListener("pointermove",e=>{ if(x0==null) return; const dx=e.clientX-x0, dy=e.clientY-y0; if(Math.abs(dx)>Math.abs(dy)){ const on=fc.querySelector(".fc.on"); if(on){ on.style.transition="none"; on.style.transform=`translateX(${dx*.6}px)`; on.style.opacity=String(Math.max(.25,1-Math.abs(dx)/260)); } } });
+  const end=e=>{ if(x0==null) return; const dx=e.clientX-x0, dy=e.clientY-y0; x0=null; fc.querySelectorAll(".fc").forEach(el=>{ el.style.transition=""; el.style.transform=""; el.style.opacity=""; });
+    if(Math.abs(dx)>30&&Math.abs(dx)>Math.abs(dy)*1.1){ sw=Date.now(); setFace(FACE+(dx<0?1:-1)); } };
+  h.addEventListener("pointerup",end); h.addEventListener("pointercancel",()=>{ x0=null; fc.querySelectorAll(".fc").forEach(el=>{ el.style.transition=""; el.style.transform=""; el.style.opacity=""; }); });
   $("faces").onclick=()=>{ if(Date.now()-sw<500) return; setFace(FACE+1); };
   $("meas").querySelectorAll("button").forEach((b,k)=>b.onclick=()=>setFace(k)); })();
 $("whos").querySelectorAll("button").forEach(b=>b.onclick=()=>setWho(b.dataset.w));
@@ -378,7 +402,7 @@ function bindRows(el){
 
 /* ---------- category screens (header scrolls with the page) ---------- */
 let SC=null; const ACT=new Set();
-const TABS3={Stocks:["Holdings","Growth","Activity"],"Mutual Funds":["Holdings","Growth","Activity"],Bonds:["Bonds","Payouts","Activity"],NPS:["Growth","Activity"]};
+const TABS3={Stocks:["Holdings","Growth","Charges","Activity"],"Mutual Funds":["Holdings","Growth","Activity"],Bonds:["Bonds","Payouts","TDS","Activity"],NPS:["Growth","Activity"],Other:["Items","Growth","Activity"]};
 const scrHead=(t,sub)=>`<div class="hd"><button class="ib" data-back aria-label="Back"><svg viewBox="0 0 24 24"><path d="M19 12H5M11 6l-6 6 6 6"/></svg></button><h2>${esc(t)}</h2>${sub||""}</div>`;
 function openScr(h,opts){ SC=Object.assign({h,tab:(TABS3[h]||[])[0]||"",sort:"value"},opts||{}); ACT.clear(); S3.theme(h==="pol"?"ins":h); renderScr();
   if(!isOpen($("scr"))) ov.open($("scr"),()=>{ vanish($("scr")); SC=null; S3.theme(TAB_NOW==="ins"?"ins":"home"); upCheck(); }); else { const b=$("scrBody"); b.classList.remove("swap"); void b.offsetWidth; b.classList.add("swap"); }
@@ -395,7 +419,7 @@ function renderScr(){
   if(!SC) return; const h=SC.h, B=$("scrBody"), dk=$("scrDock");
   if(h==="pol"){ renderPolicy(); return; }
   const c=CLS[h]; let x=scrHead(c.label);
-  x+=`<div class="whos" id="sWho">${[["all","Everyone"],["Aditya","Aditya"],["Spardha","Spardha"]].map(([k,l])=>`<button data-w="${k}" aria-pressed="${WHO===k}">${l}</button>`).join("")}</div>`;
+  x+=`<div class="whos" id="sWho">${[["all","Together"],["Aditya","Aditya"],["Spardha","Spardha"]].map(([k,l])=>`<button data-w="${k}" aria-pressed="${WHO===k}">${l}</button>`).join("")}</div>`;
   const T3=TABS3[h]||[], key=h==="NPS"?"Others":h, r=agg(key,WHO); x+=sumCard(h,r);
   if(T3.length>1) x+=`<div class="tabs3" id="sTabs">${T3.map(t=>`<button data-t="${t}" aria-pressed="${SC.tab===t}">${t}</button>`).join("")}</div>`;
   const T=[].concat(...r.U.map(u=>u.T));
@@ -404,8 +428,12 @@ function renderScr(){
   else if(SC.tab==="Activity") x+=actBody(T);
   else if(SC.tab==="Bonds") x+=bondsBody();
   else if(SC.tab==="Payouts") x+=`<div id="pChart"></div>`+payoutList();
+  else if(SC.tab==="Items") x+=itemsBody();
+  else if(SC.tab==="Charges") x+=chargesBody();
+  else if(SC.tab==="TDS") x+=tdsBody();
   dk.innerHTML=h==="Bonds"?`<div class="in"><button class="btn2" data-act="bell">Repayments</button><button class="btn1" data-act="add">Add bond</button></div>`
     :h==="NPS"?`<div class="in"><button class="btn2" data-act="npsval">Update value</button><button class="btn1" data-act="add">Add contribution</button></div>`
+    :h==="Other"?`<div class="in"><button class="btn2" data-act="vals">Update value</button><button class="btn1" data-act="add">Add</button></div>`
     :`<div class="in"><button class="btn2" data-act="vals">Update value</button><button class="btn1" data-act="add">${h==="Stocks"?"Buy or sell":"Add"}</button></div>`;
   B.innerHTML=x; bindScr(B);
   if(SC.tab==="Growth"){ growthChart($("gChart"),r.U,c.col); flowChart($("fChart"),T); }
@@ -418,6 +446,7 @@ function bindScr(B){ const dk=$("scrDock");
   B.querySelectorAll("[data-sort]").forEach(b=>b.onclick=()=>{ SC.sort=b.dataset.sort; renderScr(); });
   B.querySelectorAll("[data-yr]").forEach(b=>b.onclick=()=>{ const y=b.dataset.yr; ACT.has(y)?ACT.delete(y):ACT.add(y); renderScr(); });
   B.querySelectorAll("[data-act]").forEach(b=>b.onclick=()=>doAct(b.dataset.act,b));
+  B.querySelectorAll("[data-tds]").forEach(b=>b.onclick=()=>{ const [fy,p2]=b.dataset.tds.split("|"); tdsUpload(+fy,p2); });
   dk.querySelectorAll("[data-act]").forEach(b=>b.onclick=()=>doAct(b.dataset.act,b));
   bindRows(B); tiltAll(B); }
 function doAct(a,el){
@@ -426,6 +455,7 @@ function doAct(a,el){
   else if(a==="npsval") openValues("NPS");
   else if(a==="vals") openValues(h);
   else if(a==="bell") openBell();
+  else if(a==="chg-up") chargesUpload();
   else if(a==="pol-renew") policyUpload(SC.id,"renew");
   else if(a==="pol-doc") policyUpload(SC.id,"doc");
   else if(a==="pol-read") policyRead(SC.id,el&&el.dataset.term);
@@ -581,7 +611,7 @@ function fundSheet(id){ const f=fundsFromOrders("all").find(x=>x.id===id); if(!f
 function txSheet(t){ if(!t) return; const r=t.src||{}, link=M.url&&t.row?`${M.url}#gid=${M.gid}&range=A${t.row}`:"", neg=txNeg(t);
   openE(`<div class="eamt num" style="color:${neg?"var(--spend)":"var(--ink)"}">${t.type==="Bonus"?"+"+qtyf(t.qty)+" shares":money(Math.abs(t.show),false)}</div><div class="t">${esc(txTitle(t))}</div>
     ${dl([["Date",fmtD(t.date)],["Whose money",esc(t.who)],["Account",esc(t.acct)],t.name?["Name",esc(t.name)]:null,t.qty?[t.asset==="Mutual Funds"?"Units":"Quantity",qtyf(t.qty)]:null,t.price?["Price",money(t.price,false)]:null,
-      ["Type",esc(t.type)],t.via?["Paid via",esc(t.via==="Balance"?"Account balance":t.via)]:null,t.tds?["TDS deducted",money(t.tds,false)]:null,t.pr?["Principal part",money(t.pr,false)]:null,t.net?["Reached the bank",money(t.net,false)]:null,t.note2?["Note",esc(t.note2)]:null,t.id&&!t.pending?["Entry",esc(t.id)]:null])}
+      ["Type",esc(t.type)],t.via?["Paid via",esc(t.via==="Balance"?"Account balance":t.via)]:null,t.bank?["Bank",esc(t.bank)]:null,t.tds?["TDS deducted (your income, paid as tax)",money(t.tds,false)]:null,t.pr?["Principal part",money(t.pr,false)]:null,t.net?["Reached the bank",money(t.net,false)]:null,t.note2?["Note",esc(t.note2)]:null,t.id&&!t.pending?["Entry",esc(t.id)]:null])}
     <div class="s">${t.pending?"Waiting to sync":link?`<a href="${esc(link)}" target="_blank" rel="noopener">Open in the sheet</a>`:""}</div>
     ${t.internal?"":`<div class="btns"><button class="x" type="button" id="tDel">Delete entry</button></div>`}${closeBtn}`);
   const del=$("tDel"); if(del) del.onclick=()=>confirmSheet("Delete this entry?",`${txTitle(t)} · ${fmtD(t.date)}. It is removed from the Ledger in your sheet.`,"Delete",()=>{
@@ -613,7 +643,8 @@ function openGain(){ const R=HOME.map(h=>agg(h,WHO)).filter(r=>r.U.length);
 
 /* ---------- the bell: everything that needs you ---------- */
 function bellItems(){ const due=dueItems("all"), soon=soonItems("all",30), ib=recs("inbox").filter(r=>r.d.status==="new"||r.d.status==="ready"), ren=renewals(45);
-  return {due,soon,ib,ren,n:due.length+ib.filter(r=>r.d.status==="ready").length+ren.filter(x=>x.left<=30).length}; }
+  const chg=chargeYears("all").filter(x=>x.open), tds=tdsYears("all").filter(x=>x.due||x.status==="mismatch");
+  return {due,soon,ib,ren,chg,tds,n:due.length+ib.filter(r=>r.d.status==="ready").length+ren.filter(x=>x.left<=30).length+chg.filter(x=>x.ended).length+tds.length}; }
 function paintBell(){ if(!M) return; const B=bellItems(); $("bellN").hidden=!B.n; $("bellN").textContent=B.n>9?"9+":B.n; $("bellBtn").classList.toggle("ring",B.n>0);
   $("dInboxS").innerHTML=recs("inbox").some(r=>r.d.status==="new")?`<span class="tag due">${recs("inbox").filter(r=>r.d.status==="new").length} waiting</span>`:"›"; }
 function openBell(){ const B=bellItems(), wait=B.ib.filter(r=>r.d.status==="new"), ready=B.ib.filter(r=>r.d.status==="ready");
@@ -622,11 +653,15 @@ function openBell(){ const B=bellItems(), wait=B.ib.filter(r=>r.d.status==="new"
   if(ready.length) h+=`<div class="gh"><span>Claude has read · review</span><b class="num">${ready.length}</b></div><div class="list">${ready.map(inboxRow).join("")}</div>`;
   if(B.due.length) h+=`<div class="gh"><span>Repayments to confirm</span><b class="num">${B.due.length}</b></div><div class="list">${B.due.map(x=>row(x,"due")).join("")}</div>`;
   if(B.ren.length) h+=`<div class="gh"><span>Insurance renewals</span><b class="num">${B.ren.length}</b></div><div class="list">${B.ren.map(x=>`<button class="hl" data-pol="${esc(x.pol.id)}"><span class="av" style="background:${polCol(x.pol)}">${svgI(polIcon(x.pol),"#fff",20)}</span><div style="min-width:0"><div class="n">${esc(x.pol.d.title)}</div><div class="m">${x.left<0?"Expired "+fmtD(x.end):"Ends "+fmtD(x.end)}</div></div><div class="r"><b class="num">${x.left<0?"—":x.left+"d"}</b><small><span class="tag ${x.left<0?"bad":"due"}">${x.left<0?"Expired":"Renew"}</span></small></div></button>`).join("")}</div>`;
+  if(B.tds.length) h+=`<div class="gh"><span>TDS to verify · before filing ITR</span><b class="num">${B.tds.length}</b></div><div class="list">${B.tds.map(x=>`<button class="hl" data-tdsb="${x.fy}|${esc(x.person)}"><span class="av" style="background:var(--accent);color:#111">${svgI("check","#111",18)}</span><div style="min-width:0"><div class="n">${fyL(x.fy)} · ${esc(x.person)}'s 26AS</div><div class="m">${x.status==="mismatch"?"Differs from 26AS · follow up":"Upload 26AS / AIS · Claude matches it"}</div></div><div class="r"><b class="num">${money(x.tds,true)}</b><small><span class="tag ${x.status==="mismatch"?"bad":"due"}">${x.status==="mismatch"?"Check":"Verify"}</span></small></div></button>`).join("")}</div>`;
+  if(B.chg.length) h+=`<div class="gh"><span>Charges to make exact</span><b class="num">${B.chg.length}</b></div><div class="list">${B.chg.map(x=>`<button class="hl" data-chgb="${esc(x.acct)}|${x.fy}"><span class="av" style="background:${CLS.Stocks.col}">${svgI("file","#fff",18)}</span><div style="min-width:0"><div class="n">${fyL(x.fy)} · ${esc(x.acct)}</div><div class="m">${x.ended?"Upload Groww's P&L + ledger for the year":"Estimated so far · upload after the year ends"}</div></div><div class="r"><b class="num">${money(x.est,true)}</b><small><span class="tag ${x.ended?"due":"neo"}">${x.ended?"Upload":"Later"}</span></small></div></button>`).join("")}</div>`;
   if(wait.length) h+=`<div class="gh"><span>Waiting for Claude</span><b class="num">${wait.length}</b></div><div class="list">${wait.map(inboxRow).join("")}</div><button class="ai" id="bProc">${svgI("spark","var(--neon2)")}<span><b>Process now</b><small>Opens a new chat in your Artha project; send the message that's copied for you</small></span></button>`;
   if(B.soon.length) h+=`<div class="gh"><span>Coming up · 30 days</span><b class="num">${money(SUM(B.soon,x=>x.e.a),true)}</b></div><div class="list">${B.soon.map(x=>row(x,"soon")).join("")}</div>`;
-  if(!B.due.length&&!B.ib.length&&!B.ren.length&&!B.soon.length) h+=`<div class="empty">All clear. Nothing needs you right now.</div>`;
+  if(!B.due.length&&!B.ib.length&&!B.ren.length&&!B.soon.length&&!B.tds.length&&!B.chg.length) h+=`<div class="empty">All clear. Nothing needs you right now.</div>`;
   h+=closeBtn;
-  openE(h); const pb=$("bProc"); if(pb) pb.onclick=processNow; }
+  openE(h); const pb=$("bProc"); if(pb) pb.onclick=processNow;
+  $("eBox").querySelectorAll("[data-tdsb]").forEach(b=>b.onclick=()=>{ const [fy,p2]=b.dataset.tdsb.split("|"); tdsUpload(+fy,p2); });
+  $("eBox").querySelectorAll("[data-chgb]").forEach(b=>b.onclick=()=>{ const i=b.dataset.chgb.lastIndexOf("|"); chargesUpload({acct:b.dataset.chgb.slice(0,i),fy:+b.dataset.chgb.slice(i+1)}); }); }
 $("bellBtn").onclick=openBell;
 
 /* ---------- repayments: amount that reached the bank + 10% TDS on the interest part ---------- */
@@ -714,9 +749,9 @@ function processNow(){ const n=recs("inbox").filter(r=>r.d.status==="new").lengt
   try{ navigator.clipboard&&navigator.clipboard.writeText(msg); }catch(e){}
   showToast("Copied: “"+msg+"” — paste it in the new chat",5000); setTimeout(()=>window.open(PROJECT_URL,"_blank","noopener"),350); }
 function inboxRow(r){ const d=r.d, ready=d.status==="ready";
-  return `<button class="hl" data-ib="${esc(r.id)}"><span class="av" style="background:linear-gradient(135deg,var(--neon2),var(--neon))">${svgI(d.kind==="bond"?"bond":"file","#04110f",20)}</span><div style="min-width:0"><div class="n">${esc(d.title||"Document")}</div><div class="m">${(d.files||[]).length} file${(d.files||[]).length===1?"":"s"} · ${esc(String(d.at||"").slice(0,10))}</div></div><div class="r"><small><span class="tag ${ready?"neo":"due"}">${ready?"Review":"Waiting"}</span></small></div></button>`; }
+  return `<button class="hl" data-ib="${esc(r.id)}"><span class="av" style="background:linear-gradient(135deg,var(--neon2),var(--neon))">${svgI(d.kind==="bond"?"bond":d.kind==="charges"?"stocks":d.kind==="tds"?"check":"file","#04110f",20)}</span><div style="min-width:0"><div class="n">${esc(d.title||"Document")}</div><div class="m">${(d.files||[]).length} file${(d.files||[]).length===1?"":"s"} · ${esc(String(d.at||"").slice(0,10))}</div></div><div class="r"><small><span class="tag ${ready?"neo":"due"}">${ready?"Review":"Waiting"}</span></small></div></button>`; }
 function openInboxItem(id){ const r=M.rec.get(id); if(!r) return; const d=r.d;
-  if(d.status==="ready"){ if(d.kind==="bond") return reviewBond(r); return reviewPolicy(r); }
+  if(d.status==="ready"){ if(d.kind==="bond") return reviewBond(r); if(d.kind==="entry") return reviewEntry(r); if(d.kind==="charges") return reviewCharges(r); if(d.kind==="tds") return reviewTds(r); return reviewPolicy(r); }
   openE(`<div class="t big">${esc(d.title)}</div><div class="s" style="text-align:left">Waiting for Claude to read ${(d.files||[]).length} file${(d.files||[]).length===1?"":"s"}.</div>
     <div class="list" style="padding:0 14px">${(d.files||[]).map(f=>`<a class="doc" href="${esc(f.url)}" target="_blank" rel="noopener">${svgI("file","var(--neon)")}<span>${esc(f.name)}</span></a>`).join("")}</div>
     <button class="go" type="button" id="iNow">Process now</button><div class="btns"><button class="x" type="button" id="iDel">Remove from inbox</button>${closeBtn}</div>`);
@@ -743,6 +778,111 @@ function reviewBond(r){ const d=r.d, x=d.res||{}, c=d.ctx||{}, S=(x.sched||[]).m
     OUT.push({kind:"rec",ops:[{id:"bond:"+key,kind:"bond",title:name,data:{sched:S,rate:x.rate||"",bondId:x.bondId||"",acct,who:c.who||"Aditya",name,platform:platOf(acct),src:"Claude · screenshots "+M.today,gain:Math.round(gain),remind:rem}}],rid:rid()});
     if(rem==="cal") queueCal(bondCal(key,name,acct,S.map(e=>({d:e.d,a:e.p+e.i}))));
     inboxDone(r.id); saveOut(); ov.back(); refresh(); flush(); showToast(`${name} saved with ${S.length} repayment dates`); }; }
+
+/* ---------- Other investments: one row per item ---------- */
+function othItems(who){ return [].concat(...M.units.filter(u=>u.h==="Other"&&okWho(u.who,who)).map(u=>othItemsOf(u,M.rec,M.today).map(it=>Object.assign(it,{unitV:u.V.length?u:null})))); }
+function itemsBody(){ const L=othItems(WHO).sort((a,b)=>b.cur-a.cur);
+  if(!L.length) return `<div class="emptyc">${svgI("other","var(--neon)")}<b>Nothing here yet</b><p>Add PPF, post office schemes, P2P, gold, chit funds or anything else with + → Other.</p></div>`;
+  return `<div class="grp">${L.map(it=>{ const g=it.cur-(it.put-it.back); return `<div class="hl"><span class="av" style="background:${avColor(it.name)}">${esc(initials(it.name))}</span><div style="min-width:0"><div class="n">${esc(it.name)}</div><div class="m">${esc(it.acct)} · since ${fmtDs(it.first)}${it.rate?` · ${it.rate}% a year`:it.unitV?" · your value":" · at cost"}${it.end?` · till ${fmtDs(it.end)}`:it.rate?" · till withdrawn":""}</div></div><div class="r"><b class="num">${money(it.cur,true)}</b><small class="${cls(g)}">${it.rate?smoney(g,true):money(it.put-it.back,true)+" in"}</small></div></div>`; }).join("")}</div>
+    <p class="hint">Rate-based items grow by their rate every day. Others show what you put in until you update the value. Fixed-date items live under Bonds & FDs with payout reminders.</p>`; }
+
+/* ---------- charges: what the ledger holds vs. Groww's own statement, per financial year ---------- */
+const fyL=fy=>`FY ${fy}-${String(+fy+1).slice(2)}`;
+const fyEnd=fy=>`${+fy+1}-03-31`;
+function chargeYears(who){ const m=new Map();
+  M.tx.filter(t=>t.type==="Charges"&&t.date&&okWho(t.who,who)).forEach(t=>{ const fy=t.fy?+t.fy:fyOf(t.date), k=t.acct+"|"+fy; let x=m.get(k);
+    if(!x){ x={k,acct:t.acct,who:t.who,fy,tot:0,est:0,n:0,adj:null}; m.set(k,x); }
+    x.tot+=t.show; x.n++; if(/estimated/i.test(t.note||"")) x.est+=t.show; if(t.fy) x.adj=t; });
+  for(const x of m.values()){ const R=M.rec.get("chg:"+x.k); x.rec=R?R.d:null; x.ended=M.today>fyEnd(x.fy); x.open=x.est>0&&!x.rec; }
+  return [...m.values()].sort((a,b)=>b.fy-a.fy||a.acct.localeCompare(b.acct)); }
+const CHL=[["brokerage","Brokerage"],["stt","STT"],["exchange","Exchange"],["sebi","SEBI"],["stamp","Stamp duty"],["gst","GST"],["dp","DP charges"],["ipft","IPFT"],["other","Other"]];
+function chargesBody(){ const Y=chargeYears(WHO), tot=SUM(Y,x=>x.tot);
+  return `<div class="gh"><span>Brokerage, taxes and fees</span><b class="num">${money(tot,true)}</b></div>`
+    +(Y.length?Y.map(x=>`<div class="fyrow"><span class="k">${fyL(x.fy)} · ${esc(x.acct)}</span><b>${money(x.tot,false)}</b>
+      <span class="m">${x.rec?`<span class="tag neo">Reconciled</span> with Groww statement · ${esc(x.rec.at||"")}`:x.est?`<span class="tag due">Estimated ${esc(rs(x.est,false))}</span> · upload the ${fyL(x.fy)} statements to make it exact`:`From Groww's ledger · ${x.n} entries`}</span>
+      ${x.rec&&x.rec.items?`<div class="brk">${CHL.filter(([k])=>+x.rec.items[k]).map(([k,l])=>`<span>${l}<b>${esc(rs(+x.rec.items[k],false))}</b></span>`).join("")}</div>`:""}</div>`).join(""):`<div class="empty">No charges recorded yet.</div>`)
+    +`<button class="ai" data-act="chg-up">${svgI("spark","var(--neon2)")}<span><b>Reconcile with Groww statements</b><small>Upload the FY's Stocks P&L report and ledger statement · Claude works out the exact charges</small></span></button>
+    <p class="hint">New trades use Groww's published rates as an estimate; the statement replaces that with the real figure for the year (one adjusting entry per year).</p>`; }
+function chargesUpload(pre){ const accts=M.accts.filter(a=>/groww/i.test(a)); const Y=chargeYears("all"); const fys=[...new Set([fyOf(M.today)].concat(Y.map(x=>x.fy)))].sort((a,b)=>b-a);
+  let acct=pre&&pre.acct||accts[0]||"Groww · Aditya", fy=pre&&pre.fy||(Y.find(x=>x.open)||{}).fy||fyOf(M.today)-1;
+  const draw=()=>{ openE(`<div class="t big">${svgI("spark","var(--neon2)",20)} Exact charges for a year</div>
+    <div class="fld"><span>Account</span><div class="seg sm wrap" id="cA">${accts.map(a=>`<button type="button" data-v="${esc(a)}" aria-pressed="${a===acct}">${esc(a)}</button>`).join("")}</div></div>
+    <div class="fld"><span>Financial year</span><div class="seg sm wrap" id="cF">${fys.map(f=>`<button type="button" data-v="${f}" aria-pressed="${+f===+fy}">${fyL(f)}</button>`).join("")}</div></div>
+    <div class="s" style="text-align:left">From Groww (web: Profile › Reports) for <b>${fyL(fy)}</b>, upload both:<br>1. <b>Stocks P&L report</b> — totals for brokerage, STT, exchange, SEBI, stamp duty, GST.<br>2. <b>Ledger statement</b> — DP charges and their dates.<br>PDF, Excel or screenshots all work. More files are fine.</div>
+    <button class="go" type="button" id="cGo">Choose files</button>${closeBtn}`);
+    $("eBox").querySelectorAll("#cA [data-v]").forEach(b=>b.onclick=()=>{ acct=b.dataset.v; draw(); });
+    $("eBox").querySelectorAll("#cF [data-v]").forEach(b=>b.onclick=()=>{ fy=+b.dataset.v; draw(); });
+    $("cGo").onclick=()=>pickFiles("application/pdf,image/*,.xlsx,.xls,.csv",files=>{ const x=Y.find(y=>y.acct===acct&&+y.fy===+fy), owner=(M.tx.find(t=>t.acct===acct&&t.trade)||{}).who||holderOf(acct);
+      sendInbox("charges",{acct,who:owner,fy:+fy,fyLabel:fyL(fy),from:`${fy}-04-01`,to:fyEnd(fy),recorded:x?r2(x.tot):0,estimated:x?r2(x.est):0},files,`Charges · ${acct} · ${fyL(fy)}`); }); };
+  draw(); }
+function reviewCharges(r){ const d=r.d, x=d.res||{}, c=d.ctx||{}, acct=x.acct||c.acct, who=c.who||holderOf(acct);
+  const F=(x.fys||[]).map(f=>({...f,fy:+f.fy,total:+f.total||SUM(CHL,([k])=>+f[k]||0)})).filter(f=>f.fy>2000);
+  const rows=F.map(f=>{ const have=SUM(M.tx.filter(t=>t.type==="Charges"&&t.acct===acct&&t.date&&(t.fy?+t.fy:fyOf(t.date))===f.fy&&!t.fy),t=>t.show), adj=M.tx.find(t=>t.type==="Charges"&&t.acct===acct&&+t.fy===f.fy);
+    return {f,have:r2(have),diff:r2(f.total-have),adj}; });
+  openE(`<div class="t big">${svgI("spark","var(--neon2)",20)} Charges Claude found</div><div class="s" style="text-align:left">${esc(acct)} · ${esc(who)}'s money</div>
+    ${rows.map(({f,have,diff})=>`<div class="fyrow"><span class="k">${fyL(f.fy)}</span><b>${esc(rs(f.total,false))}</b><div class="brk">${CHL.filter(([k])=>+f[k]).map(([k,l])=>`<span>${l}<b>${esc(rs(+f[k],false))}</b></span>`).join("")}</div>
+      <span class="m">Recorded so far ${esc(rs(have,false))} · ${Math.abs(diff)<.01?"matches":`one adjusting entry of ${esc((diff>0?"+":"−")+rs(Math.abs(diff),false))}`}</span></div>`).join("")||`<div class="empty">No yearly totals were found. Discard and upload the P&L report.</div>`}
+    ${x.notes?`<div class="s" style="text-align:left">${esc(x.notes)}</div>`:""}
+    <button class="go" type="button" id="kOk" ${rows.length?"":"disabled"}>Save exact charges</button><div class="btns"><button class="x" type="button" id="kDel">Discard</button>${closeBtn}</div>`);
+  $("kDel").onclick=()=>{ inboxDone(r.id,"removed"); ov.back(); refresh(); };
+  $("kOk").onclick=()=>{ const add=[], recs2=[];
+    rows.forEach(({f,diff,adj})=>{ const date=fyEnd(f.fy)<M.today?fyEnd(f.fy):M.today, note=`Reconciled with Groww statement ${fyL(f.fy)} (total ${rs(f.total,false)}) [fy ${f.fy}]`;
+      const row={date,who,acct,asset:"Cash",type:"Charges",name:"",code:"",qty:"",price:"",amt:diff,via:"Balance",note};
+      if(adj) OUT.push({kind:"edit",id:adj.id,row,rid:rid()}); else if(Math.abs(diff)>=.01) add.push(row);
+      const items={}; CHL.forEach(([k])=>{ if(+f[k]) items[k]=r2(+f[k]); });
+      recs2.push({id:"chg:"+acct+"|"+f.fy,kind:"chg",title:`${acct} ${fyL(f.fy)}`,data:{acct,who,fy:f.fy,items,total:r2(f.total),at:M.today,src:"Claude · Groww statements"}}); });
+    if(add.length) OUT.push({kind:"add",rows:add,rid:rid()}); if(recs2.length) OUT.push({kind:"rec",ops:recs2,rid:rid()});
+    inboxDone(r.id); saveOut(); ov.back(); refresh(); flush(); celebrate("Charges reconciled",`${rows.length} year${rows.length>1?"s":""} · ${acct}`); }; }
+
+/* ---------- TDS: counted as your earning (payouts are recorded gross), then checked against 26AS / AIS after the year ---------- */
+function tdsYears(who){ const m=new Map();
+  M.tx.filter(t=>t.a==="Bonds"&&t.type==="Payout"&&t.tds>0&&t.date).forEach(t=>{ const person=holderOf(t.acct); if(who&&who!=="all"&&person!==who&&t.who!==who) return;
+    const fy=fyOf(t.date), k=fy+"|"+person; let x=m.get(k); if(!x){ x={k,fy,person,tds:0,gross:0,n:0,by:new Map()}; m.set(k,x); }
+    x.tds+=t.tds; x.gross+=t.show; x.n++; const nm=t.name||t.p0; const b=x.by.get(nm)||{name:nm,plat:t.p0,tds:0,gross:0,n:0}; b.tds+=t.tds; b.gross+=t.show; b.n++; x.by.set(nm,b); });
+  for(const x of m.values()){ x.tds=r2(x.tds); x.list=[...x.by.values()].map(b=>({...b,tds:r2(b.tds),gross:r2(b.gross)})); const R=M.rec.get("tds:"+x.k); x.rec=R?R.d:null;
+    x.from=`${x.fy+1}-06-15`; x.due=!x.rec&&M.today>=x.from; x.status=x.rec?x.rec.status:M.today>fyEnd(x.fy)?"due":"open"; }
+  return [...m.values()].sort((a,b)=>b.fy-a.fy||a.person.localeCompare(b.person)); }
+function tdsBody(){ const Y=tdsYears(WHO);
+  return `<div class="gh"><span>TDS deducted · counted in your gain</span><b class="num">${money(SUM(Y,x=>x.tds),true)}</b></div>`
+    +(Y.length?Y.map(x=>`<div class="fyrow"><span class="k">${fyL(x.fy)} · ${esc(x.person)}'s PAN</span><b>${money(x.tds,false)}</b>
+      <span class="m">${x.status==="verified"?`<span class="tag neo">Matches 26AS</span> · checked ${esc(x.rec.at||"")}`:x.status==="mismatch"?`<span class="tag bad">Differs from 26AS</span> · ${esc(x.rec.note||"")}`:x.status==="due"?(x.due?`<span class="tag due">Verify now</span> in 26AS / AIS`:`Verify from ${fmtD(x.from)} (TDS returns settle by then)`):"Year still running"} · on ${esc(rs(x.gross,false))} paid out</span>
+      <div class="brk">${x.list.map(b=>`<span>${esc(b.name)}<b>${esc(rs(b.tds,false))}</b></span>`).join("")}</div>
+      ${x.status!=="open"?`<button class="addr" data-tds="${x.fy}|${esc(x.person)}" style="grid-column:1/-1;justify-self:start">${x.rec?"Check again":"Verify with 26AS / AIS"} ›</button>`:""}</div>`).join(""):`<div class="empty">No TDS on payouts yet.</div>`)
+    +`<p class="hint">Bond and FD payouts are saved gross: the TDS is your income already paid as tax, so it counts in your gain. After each year, match it with Form 26AS / AIS before filing your return so you can claim it.</p>`; }
+function tdsUpload(fy,person){ const x=tdsYears("all").find(y=>y.fy===+fy&&y.person===person); if(!x) return;
+  openE(`<div class="t big">${svgI("spark","var(--neon2)",20)} Verify TDS · ${fyL(fy)}</div>
+    ${dl([["PAN holder",esc(person)],["TDS in Artha",money(x.tds,false)],["Payouts",String(x.n)]])}
+    <div class="s" style="text-align:left">On incometax.gov.in (${esc(person)}'s login): e-File › Income Tax Returns › <b>View Form 26AS</b> (or <b>AIS</b>) for assessment year ${+fy+1}-${String(+fy+2).slice(2)}. Download the PDF or take screenshots of the TDS part (Part A).<br>The 26AS PDF is locked with the date of birth (DDMMYYYY); open it once and save an unlocked copy, or use screenshots.</div>
+    <button class="go" type="button" id="tGo">Choose files</button>${closeBtn}`);
+  $("tGo").onclick=()=>pickFiles("application/pdf,image/*",files=>sendInbox("tds",{fy:+fy,fyLabel:fyL(fy),ay:`${+fy+1}-${String(+fy+2).slice(2)}`,person,total:x.tds,expected:x.list.map(b=>({name:b.name,platform:b.plat,tds:b.tds,gross:b.gross,payouts:b.n}))},files,`TDS check · ${person} · ${fyL(fy)}`)); }
+const nameHit=(a,b)=>{ const A2=keyName(a).split(" ").filter(w=>w.length>2), B2=keyName(b); return A2.some(w=>B2.includes(w)); };
+function reviewTds(r){ const d=r.d, x=d.res||{}, c=d.ctx||{}, E=(c.expected||[]), F=(x.entries||[]).map(e=>({...e,tds:+e.tds||0,paid:+e.paid||0}));
+  const rows=E.map(e=>{ const hits=F.filter(f=>nameHit(e.name,f.deductor||"")||nameHit(f.deductor||"",e.name)); return {e,found:r2(SUM(hits,f=>f.tds)),hits}; });
+  const found=r2(SUM(rows,y=>y.found)), extra=F.filter(f=>!rows.some(y=>y.hits.includes(f))), diff=r2(found-(+c.total||0)), ok=Math.abs(diff)<=1;
+  openE(`<div class="t big">${svgI("spark","var(--neon2)",20)} TDS · ${esc(c.fyLabel||"")} · ${esc(c.person||"")}</div>
+    <div class="list">${rows.map(y=>`<div class="hl"><span class="av" style="background:${Math.abs(y.found-y.e.tds)<=1?"var(--ok)":"var(--accent)"};color:#111">${Math.abs(y.found-y.e.tds)<=1?"✓":"!"}</span><div style="min-width:0"><div class="n">${esc(y.e.name)}</div><div class="m">Artha ${esc(rs(y.e.tds,false))} · 26AS ${esc(rs(y.found,false))}</div></div></div>`).join("")}</div>
+    ${extra.length?`<div class="gh"><span>Also in 26AS (not from these payouts)</span><b class="num">${extra.length}</b></div><div class="list">${extra.slice(0,12).map(f=>`<div class="hl"><div style="min-width:0"><div class="n">${esc(f.deductor||"Deductor")}</div><div class="m">${esc(f.section||"")} · paid ${esc(rs(f.paid,false))}</div></div><div class="r"><b class="num">${esc(rs(f.tds,false))}</b></div></div>`).join("")}</div>`:""}
+    ${dl([["TDS in Artha",money(+c.total||0,false)],["Matched in 26AS",money(found,false)],["Difference",`<span class="${ok?"gain":"loss"}">${smoney(diff)}</span>`]])}
+    ${x.notes?`<div class="s" style="text-align:left">${esc(x.notes)}</div>`:""}
+    <button class="go" type="button" id="tOk">${ok?"Mark as verified":"Save as a difference to follow up"}</button><div class="btns"><button class="x" type="button" id="tDel">Discard</button>${closeBtn}</div>`);
+  $("tDel").onclick=()=>{ inboxDone(r.id,"removed"); ov.back(); refresh(); };
+  $("tOk").onclick=()=>{ OUT.push({kind:"rec",ops:[{id:`tds:${c.fy}|${c.person}`,kind:"tds",title:`TDS ${c.fyLabel} ${c.person}`,data:{fy:c.fy,person:c.person,status:ok?"verified":"mismatch",found,expected:+c.total||0,diff,note:ok?"":`26AS shows ${rs(found,false)} vs ${rs(+c.total||0,false)} in Artha`,at:M.today,entries:F.slice(0,60)}}],rid:rid()});
+    inboxDone(r.id); saveOut(); ov.back(); refresh(); flush(); if(ok) celebrate("TDS verified",`${c.fyLabel} · ${c.person} · ${rs(found,false)}`); else showToast("Saved. Follow up with the deductor for the difference.",4000); }; }
+
+/* ---------- any entry read from a document ---------- */
+const OKTYPE=new Set(["Add money","Withdraw","Buy","Sell","Bonus","Redeem","Payout","Dividend","Other income","Charges","Premium","Value"]);
+function reviewEntry(r){ const d=r.d, x=d.res||{}, c=d.ctx||{};
+  const R=(x.rows||[]).map(e=>({date:e.date||c.date,who:e.who||c.who,acct:e.acct||c.acct,asset:e.asset||typeOf(c.type||"stocks")[3],type:e.type,name:e.name||c.name||"",code:e.code||"",qty:+e.qty||"",price:+e.price||"",amt:+e.amt||+e.amount||0,via:e.via||(c.via==="Balance"?"Balance":"Bank"),note:((e.note||"")+bankTag(e.bank||c.bank||"")).trim()}))
+    .filter(e=>/^\d{4}-\d{2}-\d{2}$/.test(e.date)&&OKTYPE.has(e.type)&&e.acct);
+  openE(`<div class="t big">${svgI("spark","var(--neon2)",20)} Check what Claude read</div><div class="s" style="text-align:left">${esc(d.title||"")}</div>
+    <div class="list">${R.map(e=>`<div class="hl"><span class="av" style="background:${TCOL[c.type]||"var(--neon)"};color:#111">${dOf(e.date).getDate()}</span><div style="min-width:0"><div class="n">${esc(e.type)}${e.name?" · "+esc(e.name):""}</div><div class="m">${fmtD(e.date)} · ${esc(e.who)} · ${esc(e.acct)}${e.qty?` · ${qtyf(e.qty)} @ ₹${e.price}`:""}${BANK_RE.test(e.note)?" · "+esc(BANK_RE.exec(e.note)[1]):""}</div></div><div class="r"><b class="num">${money(e.amt,false)}</b></div></div>`).join("")||`<div class="empty">Nothing usable was found. Discard and add it by hand.</div>`}</div>
+    ${x.notes?`<div class="s" style="text-align:left">${esc(x.notes)}</div>`:""}
+    <button class="go" type="button" id="eOk" ${R.length?"":"disabled"}>Save ${R.length} entr${R.length===1?"y":"ies"}</button><div class="btns"><button class="x" type="button" id="eDel">Discard</button>${closeBtn}</div>`);
+  $("eDel").onclick=()=>{ inboxDone(r.id,"removed"); ov.back(); refresh(); };
+  $("eOk").onclick=()=>{ OUT.push({kind:"add",rows:R,rid:rid()});
+    const S=(x.sched||[]).filter(e=>/^\d{4}-\d{2}-\d{2}$/.test(e.d)).map(e=>({d:e.d,p:+e.p||0,i:+e.i||0}));
+    if(S.length){ const b=R.find(e=>e.type==="Buy")||R[0]; OUT.push({kind:"rec",ops:[{id:"bond:"+b.acct+"|"+b.name,kind:"bond",title:b.name,data:{sched:S,acct:b.acct,who:b.who,name:b.name,platform:platOf(b.acct),fd:b.asset==="Bonds"?undefined:1,remind:remindPref(),src:"Claude · document "+M.today}}],rid:rid()}); }
+    inboxDone(r.id); saveOut(); ov.back(); refresh(); flush(); celebrate("Saved from your document",`${R.length} entr${R.length===1?"y":"ies"} · ${rs(SUM(R,e=>e.amt),false)}`); }; }
 
 /* ---------- INSURANCE ---------- */
 const LBL0={ins_title:"Insurance",sec_current:"This year's policy",sec_covered:"What's covered",sec_not:"Not covered",sec_excl:"Exclusions",sec_high:"Key points",sec_extra:"More details",sec_docs:"Documents",sec_hist:"Previous years",sec_prem:"Premiums",
@@ -912,141 +1052,190 @@ $("searchBtn").onclick=openSearch;
 
 /* ---------- ADD: amount → what → details. Writes plain Ledger rows. ---------- */
 const TYPES=[["stocks","Stocks","stocks","Stocks"],["mf","Mutual fund","mf","Mutual Funds"],["bond","Bond","bond","Bonds"],["fd","Fixed deposit","fd","FD"],
-  ["us","US stocks","us","US Stocks"],["cash","Money in / out","cash","Cash"],["nps","NPS","nps","NPS"],["term","Term premium","term","Insurance"]];
-const TCOL={stocks:CLS.Stocks.col,us:CLS.Stocks.col,cash:CLS.Stocks.col,mf:CLS["Mutual Funds"].col,bond:CLS.Bonds.col,fd:CLS.Bonds.col,nps:CLS.NPS.col,term:CLS.Term.col};
-const A={mode:"in",digits:"",date:"",who:"Aditya",pre:{},step:"pad",type:null,det:{}};
+  ["us","US stocks","us","US Stocks"],["cash","Money in / out","cash","Cash"],["nps","NPS","nps","NPS"],["term","Term premium","term","Insurance"],["other","Other","other","Other"]];
+const TCOL={stocks:CLS.Stocks.col,us:CLS.Stocks.col,cash:CLS.Stocks.col,mf:CLS["Mutual Funds"].col,bond:CLS.Bonds.col,fd:CLS.Bonds.col,nps:CLS.NPS.col,term:CLS.Term.col,other:CLS.Other.col};
+/* bank accounts: money always leaves from / lands in the account holder's own bank */
+const BANKS={Aditya:[["ICICI","Primary","#F58220"],["SBI","","#2D9CDB"],["PNB","","#C0392B"]],Spardha:[["HDFC","Usual","#3D7CF0"],["Ujjivan","","#7BDB5A"],["Canara","","#F2C94C"]]};
+const bankList=acct=>BANKS[holderOf(acct)]||BANKS.Aditya;
+const bankPick=acct=>{ const L=bankList(acct), b=store.get("bank:"+acct,""); return L.some(x=>x[0]===b)?b:L[0][0]; };
+const A={mode:"in",digits:"",date:"",who:"Aditya",pre:{},step:"cats",type:null,det:{}};
 const amtNum=()=>Number(A.digits||0);
 const typeOf=id=>TYPES.find(t=>t[0]===id)||TYPES[0];
 const groupOfType=id=>homeOfRow(typeOf(id)[3]);
+/* stocks and funds start with the name; the rest start with the amount */
+const TRADE=["stocks","us","mf"];
+const PADFIRST=t=>!TRADE.includes(t)&&t!=="other";
 function typesNow(){ let L2=TYPES.slice();
   if(A.mode==="out") L2=L2.filter(t=>!["term","fd"].includes(t[0]));
   if(A.pre.type) return L2.filter(t=>t[0]===A.pre.type);
   if(A.pre.a) L2=L2.filter(t=>groupOfType(t[0])===A.pre.a||(A.pre.a==="Stocks"&&t[0]==="cash"));
   return L2; }
 /* accounts that make sense for a type, most-used first */
-function acctsFor(type){ const fit={stocks:/groww|zerodha|upstox|angel|kite/i,us:/indmoney|vested|groww/i,cash:/groww|indmoney|zerodha|upstox/i,mf:/groww|kuvera|coin|zerodha/i,bond:/wint|grip|stable|golden|altifi|indmoney/i,fd:/bank|stable|fd|sbi|hdfc|icici|axis|kotak/i,nps:/nps/i,term:/insurance/i}[type]||/./;
+function acctsFor(type){ const fit={stocks:/groww|zerodha|upstox|angel|kite/i,us:/indmoney|vested|groww/i,cash:/groww|indmoney|zerodha|upstox/i,mf:/groww|kuvera|coin|zerodha/i,bond:/wint|grip|stable|golden|altifi|indmoney/i,fd:/bank|stable|fd|sbi|hdfc|icici|axis|kotak|canara|ujjivan|pnb/i,nps:/nps/i,term:/insurance/i,other:/^(?!groww|wint|grip|stable money|indmoney|nps)/i}[type]||/./;
   const used=new Map(); M.tx.forEach(t=>{ if(t.acct) used.set(t.acct,(used.get(t.acct)||0)+1); });
   const L2=M.accts.filter(a=>fit.test(a)); return L2.sort((x,y)=>(used.get(y)||0)-(used.get(x)||0)); }
 function openAdd(mode,pre){ A.mode=mode==="out"?"out":"in"; A.digits=""; A.date=TODAY(); A.pre=pre||{}; A.det={name:A.pre.name||undefined,acct:A.pre.acct}; A.type=null;
   A.who=A.pre.inv||(WHO!=="all"?WHO:"Aditya");
-  $("aErr").textContent=""; setStep("pad"); showAmt(); showDate(); paintMode(); paintWho();
+  $("aErr").textContent=""; showAmt(); showDate(); paintMode(); paintWho();
   if(!isOpen($("addSheet"))) ov.open($("addSheet"),()=>{ vanish($("addSheet")); });
-  if(A.pre.name&&TRADE.includes(A.pre.type)) pickType(A.pre.type); }
-const TRADE=["stocks","us","mf"];
+  const L2=typesNow(); if(L2.length===1) pickType(L2[0][0]); else { drawCats(); setStep("cats"); } }
 function paintMode(){ $("aMode").querySelectorAll("button").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.m===A.mode)));
   const c=A.pre.a&&CLS[A.pre.a]?CLS[A.pre.a].label.toLowerCase():"";
   $("addTitle").textContent=A.pre.name?(A.mode==="out"?"Sell · ":"Buy · ")+A.pre.name:A.pre.type==="term"?"Term premium":A.mode==="out"?(c?"Take out of "+c:"Withdraw or sell"):(c?"Add to "+c:"New entry"); }
 function paintWho(){ $("aWho").textContent=A.who; $("aWhoBtn").disabled=!!A.pre.inv||A.pre.type==="term"; }
-function setStep(s){ A.step=s; $("aPad").hidden=s!=="pad"; $("aCats").hidden=s!=="cats"; $("aDet").hidden=s!=="det"; $("catHint").hidden=s!=="cats"; $("aPanel").hidden=s==="det"; $("aMode").hidden=s!=="pad"||A.pre.type==="term"; }
+function setStep(s){ A.step=s; $("aPad").hidden=s!=="pad"; $("aCats").hidden=s!=="cats"; $("aDet").hidden=s!=="det"; $("catHint").hidden=s!=="cats"; $("aPanel").hidden=s!=="pad"; $("aMode").hidden=s!=="cats"||A.pre.type==="term";
+  $("aChoose").textContent="Next"; }
 function showAmt(){ const n=amtNum(); $("aVal").textContent=n?n.toLocaleString("en-IN"):"0"; $("aVal").classList.toggle("long",String(n).length>8); }
 function showDate(){ $("aDate").value=A.date; $("aDateTxt").textContent=A.date===TODAY()?"Today":fmtD(A.date); }
-$("aDate").addEventListener("change",()=>{ A.date=$("aDate").value||TODAY(); showDate(); });
-$("aMode").querySelectorAll("button").forEach(b=>b.onclick=()=>{ A.mode=b.dataset.m; paintMode(); });
+$("aDate").addEventListener("change",()=>{ A.date=$("aDate").value||TODAY(); showDate(); if(A.step==="det") drawDet(); });
+$("aMode").querySelectorAll("button").forEach(b=>b.onclick=()=>{ A.mode=b.dataset.m; paintMode(); drawCats(); });
 $("aWhoBtn").onclick=()=>{ if($("aWhoBtn").disabled) return; A.who=A.who==="Aditya"?"Spardha":"Aditya"; paintWho(); };
 $("aBack").onclick=()=>{ A.digits=A.digits.slice(0,-1); showAmt(); };
 $("aPad").querySelectorAll("[data-k]").forEach(b=>b.onclick=()=>{ const k=b.dataset.k; $("aErr").textContent=""; if(k==="back") A.digits=A.digits.slice(0,-1); else if(A.digits.length<11) A.digits=(A.digits+k).replace(/^0+/,""); showAmt(); if(navigator.vibrate) navigator.vibrate(6); });
 addEventListener("keydown",e=>{ if(!isOpen($("addSheet"))||A.step!=="pad"||/INPUT|TEXTAREA/.test(document.activeElement.tagName)) return;
   if(/^\d$/.test(e.key)){ A.digits=(A.digits+e.key).replace(/^0+/,"").slice(0,11); showAmt(); } else if(e.key==="Backspace"){ A.digits=A.digits.slice(0,-1); showAmt(); } else if(e.key==="Enter") $("aChoose").click(); });
-$("aChoose").onclick=()=>{ if(!amtNum()&&!typesNow().some(t=>TRADE.includes(t[0]))){ $("aErr").textContent="Enter the amount first."; return; } const L2=typesNow(); if(L2.length===1){ pickType(L2[0][0]); } else { drawCats(); setStep("cats"); } };
-$("closeAdd").onclick=()=>{ if(A.step==="det"){ const L2=typesNow(); if(L2.length>1){ drawCats(); setStep("cats"); } else setStep("pad"); } else if(A.step==="cats") setStep("pad"); else ov.back(); };
+$("aChoose").onclick=()=>{ if(!amtNum()){ $("aErr").textContent="Enter the amount first."; return; } $("aErr").textContent=""; drawDet(); setStep("det"); };
+$("closeAdd").onclick=()=>{ const many=typesNow().length>1;
+  if(A.step==="det"){ if(PADFIRST(A.type)) setStep("pad"); else if(many){ drawCats(); setStep("cats"); } else ov.back(); }
+  else if(A.step==="pad"){ if(many){ drawCats(); setStep("cats"); } else ov.back(); } else ov.back(); };
 function drawCats(){ const L2=typesNow();
-  $("aCats").innerHTML=L2.map(t=>`<button type="button" class="card" data-t="${t[0]}" style="color:${TCOL[t[0]]}">${svgI(t[2],TCOL[t[0]])}<span style="color:var(--ink)">${t[1]}</span></button>`).join("");
+  $("aCats").innerHTML=`<div class="fld" style="grid-column:1/-1"><div class="seg sm" id="cWho">${WHOS.map(w=>`<button type="button" data-v="${w}" aria-pressed="${A.who===w}">${w}'s money</button>`).join("")}</div></div>`
+    +L2.map(t=>`<button type="button" class="card" data-t="${t[0]}" style="color:${TCOL[t[0]]}">${svgI(t[2],TCOL[t[0]])}<span style="color:var(--ink)">${t[1]}</span></button>`).join("");
+  $("aCats").querySelectorAll("#cWho [data-v]").forEach(b=>b.onclick=()=>{ if(A.pre.inv) return; A.who=b.dataset.v; paintWho(); drawCats(); });
   $("aCats").querySelectorAll("[data-t]").forEach(b=>b.onclick=()=>pickType(b.dataset.t)); }
-function pickType(t){ if(!amtNum()&&!TRADE.includes(t)){ setStep("pad"); $("aErr").textContent="Enter the amount first."; return; } A.type=t; const keepAcct=A.pre.acct; A.det={name:A.pre.name||undefined,acct:keepAcct||store.get("acct:"+t,"")}; if(t==="term") A.who="Aditya"; drawDet(); setStep("det"); }
+function pickType(t){ A.type=t; const keepAcct=A.pre.acct; A.det={name:A.pre.name||undefined,acct:keepAcct||store.get("acct:"+t,"")}; if(t==="term") A.who="Aditya";
+  if(PADFIRST(t)&&!amtNum()){ showAmt(); setStep("pad"); return; } drawDet(); setStep("det"); }
 function recentOf(f,filter){ const seen=[]; M.tx.filter(t=>t[f]&&(!filter||filter(t))).sort((a,b)=>(b.date||"")<(a.date||"")?-1:1).forEach(t=>{ if(!seen.includes(t[f])) seen.push(t[f]); }); return seen; }
-function fdSched(P,rate,start,end,pay){ const r=rate/100, S=[]; if(!(P>0&&r>0&&end>start)) return S;
-  if(pay==="end"){ const yrs=days(start,end)/365, amt=P*Math.pow(1+r/4,4*yrs); S.push({d:end,p:P,i:Math.round((amt-P)*100)/100}); return S; }
-  const step=pay==="m"?1:3; let d=addMonths(start,step), prev=start;
+function fdSched(P,rate,start,end,pay,comp){ const r=rate/100, S=[]; if(!(P>0&&r>0&&end>start)) return S; const n={y:1,q:4,m:12,s:0}[comp||"q"];
+  if(pay==="end"){ const yrs=days(start,end)/365, amt=n?P*Math.pow(1+r/n,n*yrs):P*(1+r*yrs); S.push({d:end,p:P,i:Math.round((amt-P)*100)/100}); return S; }
+  const step=pay==="m"?1:pay==="y"?12:3; let d=addMonths(start,step), prev=start;
   while(d<end){ S.push({d,p:0,i:Math.round(P*r*days(prev,d)/365*100)/100}); prev=d; d=addMonths(d,step); }
   S.push({d:end,p:P,i:Math.round(P*r*days(prev,end)/365*100)/100}); return S; }
+/* the money source / destination row: bank chips (+ the broker balance for stocks) */
+function bankRow(d,acct,opt){ const L=bankList(acct), extra=opt.extra||[], cur=d.via==="Balance"?"__bal":d.bank;
+  return `<div class="fld"><span>${opt.label}</span><div class="banks" id="dBank">${extra.map(([v,l])=>`<button type="button" data-v="${v}" aria-pressed="${cur===v}"><i style="--bc:var(--neon)"></i>${esc(l)}</button>`).join("")}
+    ${L.map(([b,tag,c])=>`<button type="button" data-v="${b}" aria-pressed="${cur===b}"><i style="--bc:${c}"></i>${b}${tag?` <small>${tag}</small>`:""}</button>`).join("")}</div>${opt.hint?`<small class="hint" style="display:block;margin-top:6px">${opt.hint}</small>`:""}</div>`; }
+const MFSTAMP=0.00005; // stamp duty on mutual fund purchases (0.005%)
 function drawDet(){
   const d=A.det, type=A.type, inv=A.mode==="in", T=typeOf(type), label=T[1];
-  const isBond=type==="bond", fd=type==="fd", term=type==="term", nps=type==="nps", cash=type==="cash", stock=type==="stocks"||type==="us", mf=type==="mf";
+  const isBond=type==="bond", fd=type==="fd", term=type==="term", nps=type==="nps", cash=type==="cash", stock=type==="stocks"||type==="us", mf=type==="mf", oth=type==="other";
   const AC=acctsFor(type); if(term) d.acct="Insurance"; if(nps&&!d.acct) d.acct="NPS · "+A.who;
-  if(!d.acct) d.acct=AC.find(a=>holderOf(a)===A.who)||AC[0]||""; const showA=[...new Set([d.acct].concat(AC))].filter(Boolean).slice(0,8);
-  if(d.via==null) d.via=stock?"Balance":mf?"Bank":"Bank";
+  if(!d.acct&&!oth) d.acct=AC.find(a=>holderOf(a)===A.who)||AC[0]||""; const showA=[...new Set([d.acct].concat(AC))].filter(Boolean).slice(0,8);
+  if(oth&&!d.acct&&!AC.length) d.acctOther=1;
+  /* where the money came from / went: stocks default to the broker balance; everything else is a bank */
+  if(d.via==null){ const last=store.get("via:"+type+":"+A.mode,""); d.via=stock?(last||"Balance"):"Bank"; }
+  if(!d.bank) d.bank=bankPick(d.acct);
   const held=stock||mf?M.hold.filter(h=>h.acct===d.acct&&h.asset===T[3]).map(h=>h.name):[];
   const heldH=(stock||mf)&&!inv?M.hold.filter(h=>h.acct===d.acct&&h.who===A.who&&h.asset===T[3]).sort((a,b)=>b.cur-a.cur):[];
   if(heldH.length&&!heldH.some(h=>h.name===d.name)){ const m=d.name&&heldH.find(h=>keyName(h.name)===keyName(d.name)); d.name=(m||heldH[0]).name; }
   const hsel=heldH.find(h=>h.name===d.name)||null;
-  if(d.amt==null) d.amt=amtNum()?String(amtNum()):""; if(d.net==null) d.net=amtNum()?String(amtNum()):"";
+  if(d.amt==null) d.amt=amtNum()?String(amtNum()):""; if(d.net==null) d.net="";
   const bondsHere=(isBond||fd)&&!inv?M.bonds.filter(b=>!b.closed&&b.acct===d.acct).map(b=>b.name):[];
-  const names=[...new Set(held.concat(bondsHere,recentOf("name",t=>t.acct===d.acct&&t.asset===T[3])))], nameL=isBond?"Bond name":fd?"Bank / FD name":mf?"Fund":"Stock";
-  if(!d.reps) d.reps=[{d:"",a:""}]; if(d.remind==null) d.remind=remindPref(); if(!d.fdPay) d.fdPay="end";
-  const keep=()=>{ const g=id=>$(id)?$(id).value:undefined; ["name","note","qty","rate","end","amt","net","px"].forEach(k=>{ const v=g("d"+k[0].toUpperCase()+k.slice(1)); if(v!==undefined) d[k]=v; }); const o=g("dAcctO"); if(o!==undefined) d.acct=o.trim();
+  const names=[...new Set(held.concat(bondsHere,recentOf("name",t=>t.acct===d.acct&&t.asset===T[3])))], nameL=isBond?"Bond name":fd?"Bank / FD name":mf?"Fund":oth?"What is it":"Stock";
+  if(!d.reps) d.reps=[{d:"",a:""}]; if(d.remind==null) d.remind=remindPref(); if(!d.fdPay) d.fdPay="end"; if(!d.comp) d.comp=fd?"q":"y"; if(!d.ret) d.ret="rate"; if(!d.till) d.till="date";
+  const keep=()=>{ const g=id=>$(id)?$(id).value:undefined; ["name","note","qty","rate","end","amt","net","px","exp"].forEach(k=>{ const v=g("d"+k[0].toUpperCase()+k.slice(1)); if(v!==undefined) d[k]=v; }); const o=g("dAcctO"); if(o!==undefined) d.acct=o.trim();
     const rr=[...document.querySelectorAll("#dReps .rr")]; if(rr.length) d.reps=rr.map(r=>({d:r.querySelector("input[type=date]").value,a:r.querySelector("input[inputmode]").value})); };
-  const q=numIn(d.qty), px=q?amtNum()/q:0;
   const verb=inv?(term?"Premium":stock?"Buying":cash?"Adding to account":"Investing"):stock?"Selling":isBond?"Money back":cash?"Taking out":"Taking out";
-  const viaSeg=stock?`<div class="fld"><span>${inv?"Paid from":"Money goes to"}</span><div class="seg sm" id="dVia"><button type="button" data-v="Balance" aria-pressed="${d.via==="Balance"}">${inv?"Account balance":"Stays in account"}</button><button type="button" data-v="Bank" aria-pressed="${d.via==="Bank"}">${inv?"Bank (adds the money too)":"My bank"}</button></div></div>`
-    :mf&&/groww/i.test(d.acct)?`<div class="fld"><span>${inv?"Paid from":"Money goes to"}</span><div class="seg sm" id="dVia"><button type="button" data-v="Bank" aria-pressed="${d.via==="Bank"}">My bank</button><button type="button" data-v="Balance" aria-pressed="${d.via==="Balance"}">Groww balance</button></div></div>`:"";
-  $("aDet").innerHTML=`<div class="sumline"><span><small style="display:block;color:var(--muted);font-size:12px">${esc(label)} · ${A.date===TODAY()?"today":fmtD(A.date)}</small>${verb}</span><b class="num" id="dSum">₹${amtNum().toLocaleString("en-IN")}</b></div>
-    ${term?"":`<div class="fld"><span>Whose money</span><div class="seg sm" id="dWho">${WHOS.map(w=>`<button type="button" data-v="${w}" aria-pressed="${A.who===w}">${w}</button>`).join("")}</div></div>`}
-    ${term?"":`<div class="fld"><span>Account</span><div class="seg sm wrap" id="dAcct">${showA.map(a=>`<button type="button" data-v="${esc(a)}" aria-pressed="${!d.acctOther&&a===d.acct}">${esc(a)}</button>`).join("")}<button type="button" data-v="__o" aria-pressed="${!!d.acctOther}">New account</button></div>${d.acctOther?`<input id="dAcctO" value="${esc(d.acct||"")}" maxlength="50" placeholder="e.g. HDFC Bank · Spardha">`:""}${d.acct&&holderOf(d.acct)!==A.who&&!nps?`<small class="hint" style="display:block;margin-top:6px">${esc(A.who)}'s money in ${esc(holderOf(d.acct))}'s account — tracked as ${esc(A.who)}'s.</small>`:""}</div>`}
-    ${isBond&&inv?`<button class="ai" id="dShot" type="button">${svgI("spark","var(--neon2)")}<span><b>Fill from screenshots</b><small>Upload the platform's screenshots; Claude reads the name, repayment dates, principal and interest</small></span></button>`:""}
-    ${heldH.length?`<label class="fld"><span>${nameL} · from your holdings</span><select id="dName">${heldH.map(h=>`<option value="${esc(h.name)}"${h.name===d.name?" selected":""}>${esc(h.name)} · ${qtyf(h.qty)} ${mf?"units":"shares"} · ${esc(rs(h.cur,false))}</option>`).join("")}</select></label>`
-    :!term&&!cash&&!nps?`<label class="fld"><span>${nameL}</span><input id="dName" list="dNames" value="${esc(d.name||"")}" maxlength="120" autocomplete="off"><datalist id="dNames">${names.map(n=>`<option value="${esc(n)}">`).join("")}</datalist></label>`:""}
-    ${stock?`<div class="btns"><label class="fld"><span>Quantity</span><input id="dQty" inputmode="decimal" value="${esc(d.qty||"")}" autocomplete="off"></label><label class="fld"><span>Price / share ₹</span><input id="dPx" inputmode="decimal" value="${esc(d.px||"")}" autocomplete="off"></label></div>
+  const plat=platOf(d.acct)||"broker";
+  const viaRow=stock?bankRow(d,d.acct,{label:inv?"Paid from":"Money went to",extra:[["__bal",inv?plat+" balance":"Stayed in "+plat]],hint:inv?(d.via==="Balance"?"Money already in the balance was counted when it went in.":"Counts as new money put in."):(d.via==="Balance"?"Still invested: it waits in the balance.":"Comes off what you've put in.")})
+    :mf?bankRow(d,d.acct,{label:inv?"Paid from bank":"Money went to bank"})
+    :term?bankRow(d,"Insurance",{label:"Paid from"})
+    :bankRow(d,d.acct||A.who,{label:inv?(cash?"From bank":"Paid from"):(cash?"To bank":"Received in")});
+  const sumAmt=TRADE.includes(type)||oth?"":`₹${amtNum().toLocaleString("en-IN")}`;
+  $("aDet").innerHTML=`<div class="sumline"><span><small style="display:block;color:var(--muted);font-size:12px">${esc(label)} · ${A.date===TODAY()?"today":fmtD(A.date)}</small>${verb}</span><b class="num" id="dSum">${sumAmt}</b></div>
+    <button class="ai sm" id="dDoc" type="button">${svgI("spark","var(--neon2)")}<span><b>${isBond&&inv?"Fill from screenshots":"Upload a document or screenshot"}</b><small>${isBond&&inv?"Claude reads the name, repayment dates, principal and interest":"Claude reads it and fills this entry for you to check"}</small></span></button>
+    ${stock||mf||oth?`<label class="fld"><span>${heldH.length?nameL+" · from your holdings":nameL}</span>${heldH.length?`<select id="dName">${heldH.map(h=>`<option value="${esc(h.name)}"${h.name===d.name?" selected":""}>${esc(h.name)} · ${qtyf(h.qty)} ${mf?"units":"shares"} · ${esc(rs(h.cur,false))}</option>`).join("")}</select>`
+      :`<input id="dName" list="dNames" value="${esc(d.name||"")}" maxlength="120" autocomplete="off" placeholder="${oth?"e.g. PPF, Post office MIS, P2P, gold, chit fund":""}"><datalist id="dNames">${names.map(n=>`<option value="${esc(n)}">`).join("")}</datalist>`}</label>`:""}
+    ${stock?`<div class="btns"><label class="fld"><span>Number of shares</span><input id="dQty" inputmode="decimal" value="${esc(d.qty||"")}" autocomplete="off"></label><label class="fld"><span>${inv?"Cost":"Price"} per share ₹</span><input id="dPx" inputmode="decimal" value="${esc(d.px||"")}" autocomplete="off"></label></div>
       ${hsel?`<button type="button" class="addr" id="dAll">Sell all ${qtyf(hsel.qty)} shares</button>`:""}
-      <label class="fld"><span>${inv?"Total paid incl. charges (optional)":"Received after charges (optional)"}</span><input id="dNet" inputmode="decimal" value="${esc(d.net||"")}" placeholder="From the order / contract note" autocomplete="off"></label><div class="calc" id="dCalc"></div>`:""}
+      ${!inv?`<label class="fld"><span>Received after charges (optional)</span><input id="dNet" inputmode="decimal" value="${esc(d.net||"")}" placeholder="From the contract note" autocomplete="off"></label>`:""}<div class="calc" id="dCalc"></div>`:""}
     ${mf?`<label class="fld"><span>${inv?"Amount paid ₹":"Amount received ₹ (optional)"}</span><input id="dAmt" inputmode="decimal" value="${esc(d.amt||"")}" autocomplete="off"></label>
-      <label class="fld"><span>${inv?"Units (optional, from the order confirmation)":"Units to redeem"}</span><input id="dQty" inputmode="decimal" value="${esc(d.qty||"")}" autocomplete="off"></label>
+      <label class="fld"><span>${inv?"Units (optional, from the order)":"Units to redeem"}</span><input id="dQty" inputmode="decimal" value="${esc(d.qty||"")}" autocomplete="off"></label>
       ${hsel?`<button type="button" class="addr" id="dAll">Redeem all ${qtyf(hsel.qty)} units</button>`:""}<div class="calc" id="dCalc"></div>`:""}
-    ${viaSeg}
+    ${term?"":`<div class="fld"><span>Whose money</span><div class="seg sm" id="dWho">${WHOS.map(w=>`<button type="button" data-v="${w}" aria-pressed="${A.who===w}">${w}</button>`).join("")}</div></div>`}
+    ${term?"":`<div class="fld"><span>${oth?"Where (bank, post office, platform…)":"Account"}</span><div class="seg sm wrap" id="dAcct">${showA.map(a=>`<button type="button" data-v="${esc(a)}" aria-pressed="${!d.acctOther&&a===d.acct}">${esc(a)}</button>`).join("")}<button type="button" data-v="__o" aria-pressed="${!!d.acctOther}">New${showA.length?" account":""}</button></div>${d.acctOther?`<input id="dAcctO" value="${esc(d.acct||"")}" maxlength="50" placeholder="e.g. ${oth?"Post office":"HDFC Bank"} · ${esc(A.who)}">`:""}${d.acct&&holderOf(d.acct)!==A.who&&!nps?`<small class="hint" style="display:block;margin-top:6px">${esc(A.who)}'s money in ${esc(holderOf(d.acct))}'s account — tracked as ${esc(A.who)}'s.</small>`:""}</div>`}
+    ${viaRow}
+    ${oth&&inv?othFields(d):""}${oth&&!inv?`<label class="fld"><span>Amount taken out ₹</span><input id="dAmt" inputmode="decimal" value="${esc(d.amt||"")}" autocomplete="off"></label><div class="fld"><span>What was it</span><div class="seg sm" id="dKind"><button type="button" data-v="w" aria-pressed="${d.kind!=="i"}">Withdrawal / closed</button><button type="button" data-v="i" aria-pressed="${d.kind==="i"}">Interest / payout</button></div></div>`:""}
     ${fd?`<div class="btns"><label class="fld"><span>Interest rate (% a year)</span><input id="dRate" inputmode="decimal" value="${esc(d.rate||"")}"></label><label class="fld"><span>Matures on</span><input id="dEnd" type="date" value="${esc(d.end||"")}" min="${A.date}"></label></div>
       <div class="fld"><span>Interest is paid</span><div class="seg sm" id="dFdPay"><button type="button" data-v="end" aria-pressed="${d.fdPay==="end"}">At maturity</button><button type="button" data-v="q" aria-pressed="${d.fdPay==="q"}">Every quarter</button><button type="button" data-v="m" aria-pressed="${d.fdPay==="m"}">Every month</button></div></div>
       <div class="calc" id="dFdC"></div>${remindSeg("dRem",d.remind,"Remind me when money is due")}`:""}
     ${isBond&&inv?`<div class="fld"><span>Repayment dates · amount back each time (before TDS)</span><div id="dReps" style="display:grid;gap:8px">${d.reps.map((r,i)=>`<div class="rr"><input type="date" value="${esc(r.d)}" aria-label="Repayment date ${i+1}"><input inputmode="numeric" placeholder="₹ amount" value="${esc(r.a)}" aria-label="Amount ${i+1}"><button type="button" data-rm="${i}" aria-label="Remove">×</button></div>`).join("")}</div>${d.reps.length<60?`<button type="button" class="addr" id="dAddR">+ Add another date</button>`:""}</div>
       ${remindSeg("dRem",d.remind,"Remind me on the repayment dates")}`:""}
+    ${(isBond||fd)&&!inv?`<label class="fld"><span>TDS deducted ₹ (optional)</span><input id="dNet" inputmode="decimal" value="${esc(d.net||"")}" placeholder="Counted as your earning; checked against 26AS"></label>`:""}
     <label class="fld"><span>${inv?"Note (optional)":"Reason (optional)"}</span><textarea id="dNote" rows="2" maxlength="250">${esc(d.note||"")}</textarea></label>
     <div class="err" id="dErr" role="alert"></div><button type="button" class="btn1" id="dSave">${inv?(term?"Save premium":isBond?"Save bond":fd?"Save FD":stock?"Save buy":"Save"):stock?"Save sale":isBond?"Save payout":"Save withdrawal"}</button>`;
   const seg=(id,fn)=>{ const el=$(id); if(el) el.querySelectorAll("[data-v]").forEach(b=>b.onclick=()=>{ keep(); fn(b.dataset.v); drawDet(); }); };
   seg("dWho",v=>{ A.who=v; paintWho(); if(nps) d.acct="NPS · "+v;
-    else if(!d.acctPicked&&!d.acctOther&&holderOf(d.acct)!==v){ const tw=AC.find(a=>platOf(a)===platOf(d.acct)&&holderOf(a)===v); if(tw) d.acct=tw; } });
-  seg("dAcct",v=>{ if(v==="__o"){ d.acctOther=1; d.acct=""; setTimeout(()=>$("dAcctO")&&$("dAcctO").focus(),30); } else { d.acctOther=0; d.acct=v; d.acctPicked=1; } });
-  seg("dVia",v=>d.via=v); seg("dFdPay",v=>d.fdPay=v);
+    else if(!d.acctPicked&&!d.acctOther&&holderOf(d.acct)!==v){ const tw=AC.find(a=>platOf(a)===platOf(d.acct)&&holderOf(a)===v); if(tw){ d.acct=tw; d.bank=bankPick(tw); } } });
+  seg("dAcct",v=>{ if(v==="__o"){ d.acctOther=1; d.acct=""; setTimeout(()=>$("dAcctO")&&$("dAcctO").focus(),30); } else { d.acctOther=0; d.acct=v; d.acctPicked=1; d.bank=bankPick(v); } });
+  seg("dBank",v=>{ if(v==="__bal") d.via="Balance"; else { d.via="Bank"; d.bank=v; } });
+  seg("dFdPay",v=>d.fdPay=v); seg("dRet",v=>d.ret=v); seg("dTill",v=>d.till=v); seg("dComp",v=>d.comp=v); seg("dOPay",v=>d.fdPay=v); seg("dKind",v=>d.kind=v);
   const nm=$("dName"); if(nm&&nm.tagName==="SELECT") nm.onchange=()=>{ keep(); d.qty=""; drawDet(); };
   const all=$("dAll"); if(all) all.onclick=()=>{ keep(); d.qty=String(r4(hsel.qty)); drawDet(); };
   const calc=()=>{ const el=$("dCalc"); if(!el) return; const v=id=>numIn($(id)?$(id).value:""), sum=$("dSum");
     if(stock){ const T2=tradeCalc(inv,v("dQty"),v("dPx"),v("dNet"),d.acct,type==="us");
-      el.innerHTML=T2.val?`<div><span>Trade value</span><b>${esc(rs(T2.val,false))}</b></div><div><span>Charges${T2.est?" (estimated, Groww rates)":T2.ch?"":" (none added)"}</span><b>${esc(T2.ch?"₹"+T2.ch.toLocaleString("en-IN"):"₹0")}</b></div><div><span>${inv?"Total paid":"You receive"}</span><b>${esc(rs(T2.net,false))}</b></div>`
-        :"<div><span>Quantity × price gives the trade value. Charges are added as their own entry.</span></div>";
-      if(sum) sum.textContent=T2.net?rs(T2.net,false):"₹0"; }
+      el.innerHTML=T2.val?`<div><span>Trade value</span><b>${esc(rs(T2.val,false))}</b></div><div><span>Charges${T2.est?" (estimated · trued up from your Groww statement)":T2.ch?"":" (none)"}</span><b>${esc(T2.ch?"₹"+T2.ch.toLocaleString("en-IN"):"₹0")}</b></div><div><span>${inv?"Total paid":"You receive"}</span><b>${esc(rs(T2.net,false))}</b></div>`
+        :"<div><span>Shares × cost per share gives the trade value. Charges are added as their own entry.</span></div>";
+      if(sum) sum.textContent=T2.net?rs(T2.net,false):""; }
     else if(mf){ const a=v("dAmt"), u=v("dQty"), px=hsel&&hsel.qty?hsel.cur/hsel.qty:0;
       el.innerHTML=(hsel?`<div><span>You hold</span><b>${qtyf(hsel.qty)} units</b></div>`+(px?`<div><span>NAV${hsel.nav?" · "+fmtDs(hsel.nav.d):""}</span><b>₹${px.toFixed(4)}</b></div>`:"")+(u&&px?`<div><span>≈ value of these units</span><b>${esc(rs(u*px,false))}</b></div>`:""):"")
-        +((!u&&a)||(u&&!a&&!inv)?`<div><span>${!u?"Units":"Amount"} worked out from the NAV of ${A.date===TODAY()?"today":fmtDs(A.date)} when you save</span></div>`:"")||"<div><span>Units from the order confirmation keep this fund's value exact.</span></div>";
-      if(sum) sum.textContent=a?rs(a,false):u&&px?"≈"+rs(u*px,false):"₹0"; } };
-  ["dQty","dPx","dNet","dAmt"].forEach(id=>{ const el=$(id); if(el) el.oninput=calc; }); calc();
+        +((!u&&a)||(u&&!a&&!inv)?`<div><span>${!u?`Units = (amount − 0.005% stamp duty) ÷ NAV of ${A.date===TODAY()?"today":fmtDs(A.date)} (AMFI), worked out when you save. Within about 1% unless the order missed the 3 pm cut-off; units from the order make it exact.`:"Amount = units × NAV of the date, worked out when you save"}</span></div>`:"")||"<div><span>Units from the order confirmation keep this fund's value exact.</span></div>";
+      if(sum) sum.textContent=a?rs(a,false):u&&px?"≈"+rs(u*px,false):""; }
+    else if(oth){ const a=v("dAmt"); if(sum) sum.textContent=a?rs(a,false):""; } };
+  ["dQty","dPx","dNet","dAmt"].forEach(id=>{ const el=$(id); if(el) el.addEventListener("input",calc); }); calc();
   const fdc=()=>{ const el=$("dFdC"); if(!el) return; const S=fdSched(amtNum(),numIn($("dRate").value),A.date,$("dEnd").value,d.fdPay), I=SUM(S,e=>e.i);
     el.innerHTML=S.length?`<div><span>${S.length} payment${S.length>1?"s":""} · interest before TDS</span><b>${esc(rs(I,false))}</b></div><div><span>Back at maturity</span><b>${esc(rs(S[S.length-1].p+S[S.length-1].i,false))}</b></div>`:"<div><span>Type the rate and the maturity date.</span></div>"; };
   if(fd){ $("dRate").oninput=fdc; $("dEnd").onchange=fdc; fdc(); }
+  const oc=()=>othCalc(d); if(oth&&inv){ ["dAmt","dRate","dEnd","dExp"].forEach(id=>{ const el=$(id); if(el){ el.addEventListener("input",()=>{ keep(); oc(); }); el.addEventListener("change",()=>{ keep(); oc(); }); } }); oc(); }
   const ar=$("dAddR"); if(ar) ar.onclick=()=>{ keep(); d.reps.push({d:"",a:""}); drawDet(); };
   document.querySelectorAll("#dReps [data-rm]").forEach(b=>b.onclick=()=>{ keep(); d.reps.splice(+b.dataset.rm,1); if(!d.reps.length) d.reps=[{d:"",a:""}]; drawDet(); });
-  const sh=$("dShot"); if(sh) sh.onclick=()=>{ keep(); pickFiles("image/*,application/pdf",files=>{ const amt=amtNum(), ctx={acct:d.acct,who:A.who,platform:platOf(d.acct),amount:amt,date:A.date,name:(d.name||"").trim()};
-    ov.back(); setTimeout(()=>sendInbox("bond",ctx,files,`New bond · ${rs(amt,false)}${ctx.name?" · "+ctx.name:""}`),120); }); };
+  $("dDoc").onclick=()=>{ keep(); pickFiles("image/*,application/pdf",files=>{ const amt=amtNum()||numIn(d.amt), ctx={type,mode:A.mode,acct:d.acct,who:A.who,platform:platOf(d.acct),amount:amt,date:A.date,name:(d.name||"").trim(),bank:d.via==="Balance"?"":d.bank,via:d.via};
+    ov.back(); setTimeout(()=>{ if(isBond&&inv) sendInbox("bond",ctx,files,`New bond · ${rs(amt,false)}${ctx.name?" · "+ctx.name:""}`);
+      else sendInbox("entry",ctx,files,`${inv?"New":"Withdraw"} · ${label}${ctx.name?" · "+ctx.name:""}`); },120); }); };
   bindRemind("dRem",v=>d.remind=v);
   $("dSave").onclick=()=>{ keep(); saveEntry(); };
 }
+/* "Other": anything that doesn't fit — fixed rate, a fixed sum on a date, or whatever it's worth on the day */
+function othFields(d){ const dated=d.till==="date";
+  return `<label class="fld"><span>Amount put in ₹</span><input id="dAmt" inputmode="decimal" value="${esc(d.amt||"")}" autocomplete="off"></label>
+    <div class="fld"><span>How it earns</span><div class="seg sm wrap" id="dRet"><button type="button" data-v="rate" aria-pressed="${d.ret==="rate"}">Fixed rate (ROI)</button><button type="button" data-v="sum" aria-pressed="${d.ret==="sum"}">Fixed amount on a date</button><button type="button" data-v="mkt" aria-pressed="${d.ret==="mkt"}">Varies (market)</button><button type="button" data-v="none" aria-pressed="${d.ret==="none"}">No return</button></div></div>
+    ${d.ret==="rate"?`<div class="btns"><label class="fld"><span>Rate % a year</span><input id="dRate" inputmode="decimal" value="${esc(d.rate||"")}"></label><div class="fld"><span>Compounds</span><div class="seg sm" id="dComp">${[["y","Yearly"],["q","Quarterly"],["m","Monthly"],["s","Simple"]].map(([k,l])=>`<button type="button" data-v="${k}" aria-pressed="${d.comp===k}">${l}</button>`).join("")}</div></div></div>`:""}
+    ${d.ret!=="sum"?`<div class="fld"><span>Runs</span><div class="seg sm" id="dTill"><button type="button" data-v="date" aria-pressed="${dated}">Until a fixed date</button><button type="button" data-v="open" aria-pressed="${!dated}">Till I withdraw</button></div></div>`:""}
+    ${dated||d.ret==="sum"?`<label class="fld"><span>${d.ret==="sum"?"You get the amount on":"Fixed return date (maturity)"}</span><input id="dEnd" type="date" value="${esc(d.end||"")}" min="${A.date}"></label>`:""}
+    ${d.ret==="sum"?`<label class="fld"><span>Amount you get back ₹</span><input id="dExp" inputmode="decimal" value="${esc(d.exp||"")}"></label>`:""}
+    ${d.ret==="rate"&&dated?`<div class="fld"><span>Interest is paid</span><div class="seg sm" id="dOPay">${[["end","At the end"],["m","Monthly"],["q","Quarterly"],["y","Yearly"]].map(([k,l])=>`<button type="button" data-v="${k}" aria-pressed="${d.fdPay===k}">${l}</button>`).join("")}</div></div>`:""}
+    <div class="calc" id="dOthC"></div>${(d.ret==="rate"&&dated)||d.ret==="sum"?remindSeg("dRem",d.remind,"Remind me when money is due"):""}`; }
+function othCalc(d){ const el=$("dOthC"); if(!el) return; const a=numIn(d.amt), r=numIn(d.rate), dated=d.till==="date";
+  if(d.ret==="rate"&&dated){ const S=fdSched(a,r,A.date,d.end||"",d.fdPay,d.comp), I=SUM(S,e=>e.i);
+    el.innerHTML=S.length?`<div><span>${S.length} payment${S.length>1?"s":""} · interest before TDS</span><b>${esc(rs(I,false))}</b></div><div><span>Back on ${fmtDs(d.end)}</span><b>${esc(rs(S[S.length-1].p+S[S.length-1].i,false))}</b></div><div><span>Kept with your bonds & FDs, with payout reminders.</span></div>`:"<div><span>Type the amount, rate and the date.</span></div>"; }
+  else if(d.ret==="sum"){ const e=numIn(d.exp), y=d.end>A.date?days(A.date,d.end)/365:0, x=a>0&&e>0&&y>0?Math.pow(e/a,1/y)-1:null;
+    el.innerHTML=x!=null?`<div><span>Gain</span><b>${esc(rs(e-a,false))}</b></div><div><span>Works out to</span><b>${pct(x)} a year</b></div>`:"<div><span>Type what you put in, what you get back and the date.</span></div>"; }
+  else if(d.ret==="rate") el.innerHTML=`<div><span>Value grows at ${r||"—"}% a year (${({y:"compounded yearly",q:"compounded quarterly",m:"compounded monthly",s:"simple interest"})[d.comp]}) until you withdraw.</span></div>`;
+  else el.innerHTML=`<div><span>${d.ret==="mkt"?"Shown at cost until you update its value (Menu › Update values).":"Kept at the amount you put in."}</span></div>`; }
 function tradeCalc(inv,q,px,net,acct,us){ const val=r2(q*px); if(!(val>0)) return {val:0,ch:0,net:0,est:false};
-  let ch=0, est=false; if(net>0) ch=Math.max(0,r2(inv?net-val:val-net)); else if(!us&&/groww/i.test(acct||"")){ ch=estCharges(inv?"B":"S",val); est=true; }
+  let ch=0, est=false; if(!inv&&net>0) ch=Math.max(0,r2(val-net)); else if(!us&&/groww/i.test(acct||"")){ ch=estCharges(inv?"B":"S",val); est=true; }
   return {val,ch,est,net:r2(inv?val+ch:val-ch)}; }
+const bankTag=b=>b?` [bank ${b}]`:"";
 function saveEntry(){ const d=A.det, type=A.type, T=typeOf(type), inv=A.mode==="in", amt=amtNum(), name=(d.name||"").trim(), note=(d.note||"").trim(), err=m=>{ $("dErr").textContent=m; };
-  const acct=(d.acct||"").trim(); if(!acct) return err("Pick an account, or type a new one."); if(!TRADE.includes(type)&&!(amt>0)) return err("Go back and enter the amount.");
-  const base={date:A.date,who:A.who,acct,asset:T[3],name,note,via:""}, rows=[]; let recOp=null, cal=[];
+  const acct=(d.acct||"").trim(); if(!acct) return err(type==="other"?"Type where it's held (e.g. Post office · "+A.who+").":"Pick an account, or type a new one."); if(PADFIRST(type)&&!(amt>0)) return err("Go back and enter the amount.");
+  const bank=d.via==="Balance"?"":(d.bank||bankPick(acct)); store.set("bank:"+acct,bank||store.get("bank:"+acct,"")); store.set("via:"+type+":"+A.mode,d.via);
+  const bt=bankTag(bank), base={date:A.date,who:A.who,acct,asset:T[3],name,note:(note+bt).trim(),via:""}, rows=[]; let recOp=null, cal=[];
   const hq=!inv?SUM(M.hold.filter(h=>h.acct===acct&&h.who===A.who&&h.asset===T[3]&&keyName(h.name)===keyName(name)),h=>h.qty):0;
-  if(type==="stocks"||type==="us"){ const q=numIn(d.qty); let px=numIn(d.px); const nt=numIn(d.net); if(!name) return err("Pick or type the stock."); if(!(q>0)) return err("Type the number of shares.");
+  if(type==="stocks"||type==="us"){ const q=numIn(d.qty); let px=numIn(d.px); const nt=inv?0:numIn(d.net); if(!name) return err("Pick or type the stock."); if(!(q>0)) return err("Type the number of shares.");
     if(!inv&&hq&&q>hq*1.0001) return err(`Only ${qtyf(hq)} shares held here.`);
-    if(!(px>0)&&nt>0) px=r2(nt/q); if(!(px>0)) return err("Type the price per share.");
+    if(!(px>0)&&nt>0) px=r2(nt/q); if(!(px>0)) return err(inv?"Type the cost per share.":"Type the price per share.");
     const C=tradeCalc(inv,q,px,nt,acct,type==="us"), chNote=C.est?"Brokerage, STT & charges (estimated)":"Brokerage, STT & charges";
-    if(inv&&d.via==="Bank") rows.push({...base,asset:"Cash",type:"Add money",name:"",amt:C.net,via:"Bank",note:"Bank → "+acct});
-    rows.push({...base,type:inv?"Buy":"Sell",qty:q,price:px,amt:C.val,via:"Balance"});
-    if(C.ch>0) rows.push({...base,asset:"Cash",type:"Charges",amt:C.ch,via:"Balance",note:chNote+" · "+(inv?"buy ":"sale ")+name});
-    if(!inv&&d.via==="Bank") rows.push({...base,asset:"Cash",type:"Withdraw",name:"",amt:C.net,via:"Bank",note:acct+" → bank"});
-    return commit(rows,C.net,null,[],type,acct); }
+    const b2={...base,note:note};
+    if(inv&&d.via==="Bank") rows.push({...b2,asset:"Cash",type:"Add money",name:"",amt:C.net,via:"Bank",note:(`${bank||"Bank"} → ${acct}`+bt).trim()});
+    rows.push({...b2,type:inv?"Buy":"Sell",qty:q,price:px,amt:C.val,via:"Balance"});
+    if(C.ch>0) rows.push({...b2,asset:"Cash",type:"Charges",amt:C.ch,via:"Balance",note:chNote+" · "+(inv?"buy ":"sale ")+name});
+    if(!inv&&d.via==="Bank") rows.push({...b2,asset:"Cash",type:"Withdraw",name:"",amt:C.net,via:"Bank",note:(`${acct} → ${bank||"bank"}`+bt).trim()});
+    return commit(rows,C.net,null,[],type,acct,{t:inv?"Bought":"Sold",s:`${qtyf(q)} ${name} · ${rs(C.net,false)}`}); }
   else if(type==="mf"){ if(!name) return err(inv?"Type the fund's name.":"Pick the fund."); let q=numIn(d.qty), a=numIn(d.amt);
     if(inv&&!a) return err("Type the amount paid."); if(!inv&&!q&&!a) return err("Type the units or the amount.");
     if(!inv&&hq&&q>hq*1.0001) return err(`Only ${qtyf(hq)} units held here.`);
-    const done=(nv)=>{ let n2=note; if(nv){ if(!q) q=r4(a/nv.nav); else if(!a) a=r2(q*nv.nav); n2=(n2+` · ${!numIn(d.qty)?"units":"amount"} from NAV ₹${nv.nav} of ${fmtD(nv.d)}`).replace(/^ · /,""); }
-      rows.push({...base,note:n2,type:inv?"Buy":"Redeem",qty:q||"",price:q&&a?r4(a/q):"",amt:a,via:d.via||"Bank"}); commit(rows,a,null,[],type,acct); };
+    const done=(nv)=>{ let n2=base.note; if(nv){ if(!q) q=r4(a*(inv?1-MFSTAMP:1)/nv.nav); else if(!a) a=r2(q*nv.nav); n2=(n2+` · ${!numIn(d.qty)?"units":"amount"} from NAV ₹${nv.nav} of ${fmtD(nv.d)}${inv&&!numIn(d.qty)?" less 0.005% stamp duty":""}`).replace(/^ · /,""); }
+      rows.push({...base,note:n2,type:inv?"Buy":"Redeem",qty:q||"",price:q&&a?r4(a/q):"",amt:a,via:"Bank"}); commit(rows,a,null,[],type,acct,{t:inv?"Invested":"Redeemed",s:`${name} · ${rs(a,false)}`}); };
     if(q&&a) return done(null);
     const btn=$("dSave"); btn.disabled=true; btn.textContent="Getting the NAV…";
     navOn(name,A.date).then(done,()=>{ btn.disabled=false; btn.textContent=inv?"Save":"Save withdrawal"; if(!a) return err("Couldn't get the NAV just now. Type the amount received."); done(null); });
@@ -1054,21 +1243,50 @@ function saveEntry(){ const d=A.det, type=A.type, T=typeOf(type), inv=A.mode==="
   else if(type==="cash") rows.push({...base,type:inv?"Add money":"Withdraw",amt,via:"Bank"});
   else if(type==="nps") rows.push({...base,name:"NPS Tier I",type:inv?"Add money":"Withdraw",amt,via:"Bank"});
   else if(type==="term") rows.push({...base,who:"Aditya",acct:"Insurance",name:"Term plan",type:"Premium",amt,via:"Bank"});
-  else if((type==="bond"||type==="fd")&&!inv){ if(!name) return err("Pick the bond."); rows.push({...base,type:"Payout",amt,via:"Bank",note:(note+" [p 0] [tds 0]").trim()}); }
+  else if((type==="bond"||type==="fd")&&!inv){ if(!name) return err("Pick the bond."); const tds=numIn(d.net);
+    rows.push({...base,type:"Payout",amt:r2(amt+tds),via:"Bank",note:(base.note+` [p 0] [tds ${tds}]`+(tds?` [net ${amt}]`:"")).trim()}); }
   else if(type==="bond"||type==="fd"){ if(!name) return err(type==="fd"?"Type the bank or FD name.":"Type the bond's name.");
     let S;
     if(type==="fd"){ const r=numIn(d.rate); if(!(r>0)) return err("Type the interest rate."); if(!d.end||d.end<=A.date) return err("Pick the maturity date."); S=fdSched(amt,r,A.date,d.end,d.fdPay); }
     else { const R=(d.reps||[]).filter(r=>r.d).map(r=>({d:r.d,a:numIn(r.a)})).sort((x,y)=>x.d<y.d?-1:1);
       if(!R.length) return err("Add at least one repayment date, or fill from screenshots."); if(R.some(r=>r.d<=A.date)) return err("Repayment dates should be after the purchase date.");
       const ex=SUM(R,r=>r.a); S=R.map((r,k)=>({d:r.d,p:k===R.length-1?Math.min(amt,r.a):0,i:k===R.length-1?Math.max(0,r.a-amt):r.a})); if(ex<amt) S=R.map(r=>({d:r.d,p:ex?amt*r.a/ex:0,i:0})); }
-    rows.push({...base,type:"Buy",amt,via:"Bank",note:(note+(type==="fd"?` ${numIn(d.rate)}% · matures ${fmtD(d.end)}`:"")).trim()});
+    rows.push({...base,type:"Buy",amt,via:"Bank",note:(base.note+(type==="fd"?` ${numIn(d.rate)}% · matures ${fmtD(d.end)}`:"")).trim()});
     const key=acct+"|"+name; recOp={id:"bond:"+key,kind:"bond",title:name,data:{sched:S,remind:d.remind,acct,who:A.who,name,platform:platOf(acct),ytm:type==="fd"?numIn(d.rate):undefined,fd:type==="fd"?1:undefined}};
     if(d.remind==="cal") cal=bondCal(key,name,acct,S.map(e=>({d:e.d,a:e.p+e.i}))); }
+  else if(type==="other"){ if(!name) return err("Type what it is."); const a=numIn(d.amt); if(!(a>0)) return err(inv?"Type the amount put in.":"Type the amount taken out.");
+    if(!inv){ rows.push({...base,type:d.kind==="i"?"Payout":"Withdraw",amt:a,via:"Bank"}); return commit(rows,a,null,[],type,acct,{t:"Saved",s:`${name} · ${rs(a,false)} out`}); }
+    const dated=d.till==="date"||d.ret==="sum";
+    if(dated&&(!d.end||d.end<=A.date)) return err("Pick the date the money comes back.");
+    if(d.ret==="rate"&&!(numIn(d.rate)>0)) return err("Type the rate (% a year).");
+    if(d.ret==="sum"&&!(numIn(d.exp)>0)) return err("Type the amount you get back.");
+    if(dated&&(d.ret==="rate"||d.ret==="sum")){ /* fixed income with a date → tracked with bonds & FDs, payouts confirmed from the bell */
+      const S=d.ret==="sum"?[{d:d.end,p:a,i:Math.max(0,r2(numIn(d.exp)-a))}]:fdSched(a,numIn(d.rate),A.date,d.end,d.fdPay,d.comp);
+      rows.push({...base,asset:"Fixed income",type:"Buy",amt:a,via:"Bank",note:(base.note+(d.ret==="rate"?` ${numIn(d.rate)}%`:"")+` · returns ${fmtD(d.end)}`).trim()});
+      const key=acct+"|"+name; recOp={id:"bond:"+key,kind:"bond",title:name,data:{sched:S,remind:d.remind,acct,who:A.who,name,platform:platOf(acct),ytm:d.ret==="rate"?numIn(d.rate):undefined,fd:1,other:1}};
+      if(d.remind==="cal") cal=bondCal(key,name,acct,S.map(e=>({d:e.d,a:e.p+e.i})));
+      return commit(rows,a,recOp,cal,type,acct,{t:"Saved",s:`${name} · ${rs(a,false)} · back ${fmtDs(d.end)}`}); }
+    rows.push({...base,type:"Buy",amt:a,via:"Bank"});
+    recOp={id:"oth:"+acct+"|"+name,kind:"oth",title:name,data:{acct,who:A.who,name,ret:d.ret,rate:d.ret==="rate"?numIn(d.rate):0,comp:d.comp,till:d.till,end:d.till==="date"?d.end:""}};
+    return commit(rows,a,recOp,[],type,acct,{t:"Saved",s:`${name} · ${rs(a,false)}`}); }
   commit(rows,amt,recOp,cal,type,acct); }
-function commit(rows,amt,recOp,cal,type,acct){
+function commit(rows,amt,recOp,cal,type,acct,yay){
   if(recOp) OUT.push({kind:"rec",ops:[recOp],rid:rid()}); if(cal.length) queueCal(cal);
   store.set("acct:"+type,acct);
-  OUT.push({kind:"add",rows,rid:rid()}); saveOut(); ov.back(); refresh(); showToast(`${rs(amt,false)} saved`); flush(); }
+  OUT.push({kind:"add",rows,rid:rid()}); saveOut(); ov.back(); refresh(); celebrate(yay?yay.t:"Saved",yay?yay.s:rs(amt,false)+" recorded"); flush(); }
+/* a small win: tick + confetti burst on every saved entry */
+const CHEERS=["Nicely done.","Every rupee counted.","Your future self says thanks.","Building, one entry at a time.","That's tracked.","Steady wins."];
+function celebrate(title,sub){ if(navigator.vibrate) navigator.vibrate([10,40,18]);
+  const y=document.createElement("div"); y.className="yay"; y.innerHTML=`<span class="tick"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><b>${esc(title)}</b><small>${esc(sub)}</small><small style="color:var(--neon)">${esc(CHEERS[Math.floor(Math.random()*CHEERS.length)])}</small>`;
+  document.body.appendChild(y); setTimeout(()=>{ y.classList.add("bye"); setTimeout(()=>y.remove(),400); },1900);
+  if(calm()) return;
+  const c=document.createElement("canvas"); c.className="cele"; document.body.appendChild(c); const dpr=Math.min(2,devicePixelRatio||1); c.width=innerWidth*dpr; c.height=innerHeight*dpr; const g=c.getContext("2d"); g.scale(dpr,dpr);
+  const cols=["#3CF0D4","#8B7CFF","#FFB547","#5B8CFF","#2EE6B0","#FF6FA8"], ox=innerWidth/2, oy=innerHeight*.38;
+  const P=Array.from({length:110},(_,i)=>{ const a=-Math.PI/2+(Math.random()-.5)*Math.PI*1.25, v=7+Math.random()*9; return {x:ox,y:oy,vx:Math.cos(a)*v,vy:Math.sin(a)*v,r:Math.random()*Math.PI,vr:(Math.random()-.5)*.4,w:5+Math.random()*6,h:3+Math.random()*4,c:cols[i%cols.length],s:i%4===0}; });
+  let t0=performance.now(); const step=now=>{ const k=(now-t0)/1000; g.clearRect(0,0,innerWidth,innerHeight);
+    P.forEach(p=>{ p.vy+=.32; p.vx*=.985; p.vy*=.985; p.x+=p.vx; p.y+=p.vy; p.r+=p.vr; g.save(); g.globalAlpha=Math.max(0,1-k/2.2); g.translate(p.x,p.y); g.rotate(p.r); g.fillStyle=p.c;
+      if(p.s){ g.beginPath(); g.arc(0,0,p.h*.7,0,Math.PI*2); g.fill(); } else g.fillRect(-p.w/2,-p.h/2,p.w,p.h); g.restore(); });
+    if(k<2.3) requestAnimationFrame(step); else c.remove(); }; requestAnimationFrame(step); }
 
 /* ---------- sync ---------- */
 let loading=false, flushing=false;
@@ -1132,6 +1350,8 @@ const openDrawer=()=>{ buildDrawer(); $("scrim").hidden=false; ov.open($("drawer
 const fromDrawer=fn=>()=>{ ov.back(); setTimeout(fn,240); };
 $("menuBtn").onclick=openDrawer; $("drawerDone").onclick=()=>ov.back(); $("scrim").onclick=()=>ov.back();
 $("dVals").onclick=fromDrawer(()=>openValues());
+$("dTds").onclick=fromDrawer(()=>openScr("Bonds",{tab:"TDS"}));
+$("dChg").onclick=fromDrawer(()=>openScr("Stocks",{tab:"Charges"}));
 $("dNps").onclick=fromDrawer(()=>{ if(agg("Others","all").U.length) openScr("NPS"); else showToast("No NPS entries yet. Add one with the + button."); });
 $("dIns").onclick=fromDrawer(()=>setTab("ins"));
 $("dInbox").onclick=fromDrawer(()=>{ const L2=recs("inbox").filter(r=>r.d.status==="new"||r.d.status==="ready");

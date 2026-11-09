@@ -11,7 +11,7 @@
 <link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icon-192.png"><link rel="apple-touch-icon" href="icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Sora:wght@400;600;700&display=swap">
-<link rel="stylesheet" href="app.css?v=3.0">
+<link rel="stylesheet" href="app.css?v=3.2">
 </head>
 <body>
 <canvas id="bg3d" aria-hidden="true"></canvas>
@@ -28,7 +28,7 @@
   <div class="ptr" id="ptr"><span class="spin"></span><span id="ptrTxt">Pull to refresh</span></div>
 
   <main id="viewInv">
-    <div class="whos" id="whos" role="group" aria-label="Whose money"><button data-w="all">Everyone</button><button data-w="Aditya">Aditya</button><button data-w="Spardha">Spardha</button></div>
+    <div class="whos" id="whos" role="group" aria-label="Whose money"><button data-w="all">Together</button><button data-w="Aditya">Aditya</button><button data-w="Spardha">Spardha</button></div>
     <div class="segv" id="segv" role="group" aria-label="3D or list"><button id="viewRing" aria-pressed="true"><svg viewBox="0 0 24 24"><path d="M12 4a8 8 0 1 1-7.6 5.5"/><path d="M12 4v4M4.4 9.5l3.8 1.2" opacity=".55"/></svg>3D view</button><button id="viewList" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M9 7h11M9 12h11M9 17h11M4.5 7h.01M4.5 12h.01M4.5 17h.01"/></svg>List</button></div>
     <section id="homeRing">
       <div class="hero" id="hero">
@@ -61,6 +61,8 @@
     <button class="dt" type="button" id="dVals" style="--c:#3CF0D4"><span class="di"><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16zM14 6l4 4"/></svg></span><b>Update values</b><small>What it's worth today</small></button>
     <button class="dt" type="button" id="dNps" style="--c:#FF8A3D"><span class="di"><svg viewBox="0 0 24 24"><path d="M3 18h18M7 18a5 5 0 0 1 10 0M12 8V5M5.6 11.6 3.8 9.8M18.4 11.6l1.8-1.8"/></svg></span><b>NPS</b><small id="dNpsS"></small></button>
     <button class="dt" type="button" id="dIns" style="--c:#B18CFF"><span class="di"><svg viewBox="0 0 24 24"><path d="M12 3 20 6v6c0 4.5-3.4 8.2-8 9-4.6-.8-8-4.5-8-9V6l8-3z"/></svg></span><b>Insurance</b><small id="dInsS"></small></button>
+    <button class="dt" type="button" id="dTds" style="--c:#FFB547"><span class="di"><svg viewBox="0 0 24 24"><path d="M7 3h7l5 5v13H7zM14 3v5h5M10 14l2 2 4-4"/></svg></span><b>TDS · 26AS</b><small>Verify before your ITR</small></button>
+    <button class="dt" type="button" id="dChg" style="--c:#5B8CFF"><span class="di"><svg viewBox="0 0 24 24"><path d="M4 19V5M4 19h16M8 15l3-4 3 2 5-6"/></svg></span><b>Charges</b><small>Exact, year by year</small></button>
     <button class="dt" type="button" id="dInbox" style="--c:#8B7CFF"><span class="di"><svg viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></svg></span><b>Claude inbox</b><small id="dInboxS"></small></button>
   </div>
   <details class="dset"><summary>Settings</summary>
@@ -123,7 +125,7 @@
 <div class="toast" id="toast" role="status" hidden></div>
 <input type="file" id="fileIn" hidden multiple>
 <script src="three.min.js" defer></script>
-<script src="scene.js?v=3.0" defer></script>
-<script src="app.js?v=3.0" defer></script>
+<script src="scene.js?v=3.2" defer></script>
+<script src="app.js?v=3.2" defer></script>
 </body>
 </html>
