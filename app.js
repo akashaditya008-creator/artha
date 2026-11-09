@@ -1,7 +1,7 @@
 /* Artha 3.9 — investments + insurance. Data lives in the "Artha – My Investments" Google Sheet via the Apps Script API. */
 (()=>{
 "use strict";
-const APP_VERSION="3.9.4";
+const APP_VERSION="3.9.5";
 /* Personal details (banks, platforms, the Claude project link) come from the backend after sign-in, so this public code holds none. */
 const CFG=()=>(typeof DATA!=="undefined"&&DATA&&DATA.cfg)||{};
 const PROJECT_URL=()=>{ const u=safeUrl(CFG().project); return u==="#"?"https://claude.ai/projects":u; };
@@ -42,6 +42,9 @@ function rs(n,short){ const a=Math.abs(n), s=n<0?"−":"";
   if(short||SHORT&&short!==false){ const f=(x,dp)=>String(parseFloat(x.toFixed(dp)));
     if(a>=1e7) return s+"₹"+f(a/1e7,2)+"Cr"; if(a>=1e5) return s+"₹"+f(a/1e5,a>=1e6?1:2)+"L"; if(a>=1e3) return s+"₹"+f(a/1e3,a>=1e4?0:1)+"K"; return s+"₹"+Math.round(a); }
   return s+"₹"+Math.round(a).toLocaleString("en-IN"); }
+/* exact figure with paise when there are any (detail pages): 60.33, 24,132 */
+const rsx=n=>{ const a=Math.abs(n), s=n<0?"−":"", f=Math.abs(a-Math.round(a))>=.005; return s+"₹"+a.toLocaleString("en-IN",{minimumFractionDigits:f?2:0,maximumFractionDigits:2}); };
+const moneyX=n=>HIDE?'<span class="money">₹••••</span>':esc(rsx(n));
 const money=(n,short)=>HIDE?'<span class="money">₹••••</span>':esc(rs(n,short));
 const smoney=(n,short)=>HIDE?'<span class="money">₹••••</span>':esc((n>0?"+":"")+rs(n,short));
 const pct=x=>x==null||!isFinite(x)?"—":(x>0?"+":"")+(x*100).toFixed(Math.abs(x)>=1?0:1)+"%";
@@ -405,9 +408,9 @@ function txTitle(t){ if(t.type==="Premium") return "Term premium"; if(t.type==="
   return (TXT[t.type]||t.type)+(t.name?" "+t.name:""); }
 const txNeg=t=>OUTT.has(t.type)||t.type==="Moved"||(t.type==="F&O result"&&t.show<0);
 const BACKT=new Set(["Withdraw","Sell","Redeem","Payout"]);
-function txRow(t,k){ const neg=txNeg(t), v=Math.abs(t.show), back=BACKT.has(t.type);
-  return `<button class="tx" data-tx="${t.i}" style="--k:${Math.min(k||0,12)}"><span class="n">${esc(txTitle(t))}</span><span class="amt num ${back?"gain":neg?"loss":""}">${t.type==="Bonus"?"+"+qtyf(t.qty):(back?"↩ ":neg?"−":"")+money(v)}</span>
-    <span class="m"><span>${[fmtDs(t.date),t.acct?whoVia(t.who,t.acct):t.who,t.trade?qtyf(t.trade.qty)+" @ "+rs(t.trade.price,false):""].filter(Boolean).map(esc).join(" · ")}</span>${t.pending?`<span class="chip sync">Syncing…</span>`:""}</span></button>`; }
+function txRow(t,k,no){ const neg=txNeg(t), v=Math.abs(t.show), back=BACKT.has(t.type);
+  return `<button class="tx" data-tx="${t.i}" style="--k:${Math.min(k||0,12)}"><span class="n">${no?`<i class="sn num">${no}</i>`:""}${esc(txTitle(t))}</span><span class="amt num ${back?"gain":neg?"loss":""}">${t.type==="Bonus"?"+"+qtyf(t.qty):(back?"↩ ":neg?"−":"")+money(v)}</span>
+    <span class="m"><span>${[fmtDs(t.date),t.acct?whoVia(t.who,t.acct):t.who,t.trade?qtyf(t.trade.qty)+" @ "+rsx(t.trade.price):""].filter(Boolean).map(esc).join(" · ")}</span>${t.pending?`<span class="chip sync">Syncing…</span>`:""}</span></button>`; }
 function bindRows(el){
   el.querySelectorAll("[data-hold]").forEach(b=>b.onclick=()=>holdSheet(M.hold[+b.dataset.hold]));
   el.querySelectorAll("[data-fund]").forEach(b=>b.onclick=()=>fundSheet(b.dataset.fund));
@@ -507,15 +510,22 @@ function holdBody(h){
     <div class="sortc">${[["value","Biggest"],["gain","Best return"],["name","A–Z"]].map(([k,l])=>`<button data-sort="${k}" aria-pressed="${by===k}">${l}</button>`).join("")}</div>
     <div class="grp">${H.map(holdRow).join("")}</div><p class="hint">Prices as of the Groww snapshot${snapD?" ("+fmtDs(snapD)+")":""} or your latest trade. New trades update this list.</p>`;
 }
-function actBody(T,h){
-  const L=T.slice().sort((a,b)=>(b.date||"")<(a.date||"")?-1:(b.date||"")>(a.date||"")?1:b.i-a.i);
+/* History = the trades themselves. On Stocks, charges live in the Charges tab and money added/taken out lives in the Balance tab. */
+const HIST_SKIP={Stocks:new Set(["Charges","Add money","Withdraw","Moved","Moved in"])};
+const HIST_LBL={Stocks:["Bought","Sold"],"Mutual Funds":["Invested","Redeemed"],Bonds:["Invested","Got back"]};
+function yearList(L,pre,lbl){
   if(!L.length) return `<div class="empty">No entries yet.</div>`;
-  const intro=`<div class="intro">Every entry you've recorded${h==="Bonds"?" for bonds":h?" here":""}, newest first. Amounts without a sign are money you put in; <span class="gain">↩</span> is money that came back to you${h==="Bonds"?" (interest and principal repayments)":h==="Stocks"?" (sales, withdrawals)":""}.</div>`;
-  const ys=[...new Set(L.map(t=>t.date?t.date.slice(0,4):"No date"))]; if(!ACT.size) ys.slice(0,1).forEach(y=>ACT.add(y));
-  return intro+ys.map(y=>{ const R=L.filter(t=>(t.date?t.date.slice(0,4):"No date")===y), inn=SUM(R.filter(t=>t.amt>0),t=>t.amt), out=-SUM(R.filter(t=>t.amt<0),t=>t.amt), open=ACT.has(y);
-    return `<button class="gh" data-yr="${y}" style="width:100%"><span>${open?"▾":"▸"} ${y} · ${R.length}</span><b class="num">Put in ${money(inn,true)}${out?` · <span class="gain">↩ ${money(out,true)} back</span>`:""}</b></button>${open?`<div class="grp">${R.map(txRow).join("")}</div>`:""}`; }).join("")
-    +`<p class="hint">Tap an entry to see, edit or delete it</p>`;
-}
+  const ys=[...new Set(L.map(t=>t.date?t.date.slice(0,4):"No date"))];
+  if(!SC["init"+pre]){ SC["init"+pre]=1; ys.slice(0,1).forEach(y=>ACT.add(pre+y)); }
+  const done=L.filter(t=>!t.pending); let no=done.length; const NO=new Map(done.map(t=>[t,no--]));
+  return ys.map(y=>{ const R=L.filter(t=>(t.date?t.date.slice(0,4):"No date")===y), open=ACT.has(pre+y), ab=t=>Math.abs(t.show||0);
+    /* what went in (bought / invested) and what came back (sold / redeemed / repaid), as shown on the rows */
+    const inn=SUM(R.filter(t=>!BACKT.has(t.type)&&!txNeg(t)&&t.type!=="Bonus"),ab), out=SUM(R.filter(t=>BACKT.has(t.type)),ab);
+    const sum=lbl?[inn?`${lbl[0]} ${money(inn,true)}`:"",out?`<span class="gain">${lbl[1]} ${money(out,true)}</span>`:""].filter(Boolean).join(" · "):money(SUM(R,ab),true);
+    return `<button class="gh" data-yr="${pre+y}" aria-expanded="${open}" style="width:100%"><span>${open?"▾":"▸"} ${y} · ${R.length}</span><b class="num">${sum}</b></button>${open?`<div class="grp">${R.map((t,k)=>txRow(t,k,NO.get(t))).join("")}</div>`:""}`; }).join("")
+    +`<p class="hint">Tap an entry to see, edit or delete it</p>`; }
+const byNewest=T=>T.slice().sort((a,b)=>(b.date||"")<(a.date||"")?-1:(b.date||"")>(a.date||"")?1:b.i-a.i);
+function actBody(T,h){ const sk=HIST_SKIP[h]; return yearList(byNewest(sk?T.filter(t=>!sk.has(t.type)):T),"h",HIST_LBL[h]||["Invested","Taken out"]); }
 function bondsBody(){
   const Bs=bondsFor(WHO), act=Bs.filter(b=>!b.closed).sort((x,y)=>(x.next?x.next.d:"9")<(y.next?y.next.d:"9")?-1:1), done=Bs.filter(b=>b.closed).sort((x,y)=>(y.mat||"")<(x.mat||"")?-1:1), due=dueItems(WHO);
   const seg=SC.bseg==="repaid"&&done.length?"repaid":"active", L=seg==="active"?act:done;
@@ -658,9 +668,9 @@ function fundSheet(id){ const f=fundsFromOrders("all").find(x=>x.id===id); if(!f
     ${dl([["Investor",esc(f.who)],["Platform",esc([...new Set(f.T.map(t=>t.p))].join(", "))],["Orders",String(f.n)],["First order",fmtD(first(f.T))]])}
     <div class="list">${f.T.slice().sort((a,b)=>a.date<b.date?1:-1).map(txRow).join("")}</div>${closeBtn}`); }
 function txSheet(t){ if(!t) return; const r=t.src||{}, link=M.url&&t.row?safeUrl(`${M.url}#gid=${encodeURIComponent(M.gid)}&range=A${Number(t.row)||1}`):"", neg=txNeg(t);
-  openE(`<div class="eamt num" style="color:${neg?"var(--spend)":"var(--ink)"}">${t.type==="Bonus"?"+"+qtyf(t.qty)+" shares":money(Math.abs(t.show),false)}</div><div class="t">${esc(txTitle(t))}</div>
-    ${dl([["Date",fmtD(t.date)],["Whose money",esc(t.who)],["Account",esc(t.acct)],t.name?["Name",esc(t.name)]:null,t.qty?[t.asset==="Mutual Funds"?"Units":"Quantity",qtyf(t.qty)]:null,t.price?["Price",money(t.price,false)]:null,
-      ["Type",esc(t.type)],t.via?["Paid via",esc(t.via==="Balance"?"Account balance":t.via)]:null,t.bank?["Bank",esc(t.bank)]:null,t.tds?["TDS deducted (your income, paid as tax)",money(t.tds,false)]:null,t.pr?["Principal part",money(t.pr,false)]:null,t.net?["Reached the bank",money(t.net,false)]:null,t.note2?["Note",esc(t.note2)]:null,t.id&&!t.pending?["Entry",esc(t.id)]:null])}
+  openE(`<div class="eamt num" style="color:${neg?"var(--spend)":"var(--ink)"}">${t.type==="Bonus"?"+"+qtyf(t.qty)+" shares":moneyX(Math.abs(t.show))}</div><div class="t">${esc(txTitle(t))}</div>
+    ${dl([["Date",fmtD(t.date)],["Whose money",esc(t.who)],["Account",esc(t.acct)],t.name?["Name",esc(t.name)]:null,t.qty?[t.asset==="Mutual Funds"?"Units":"Quantity",qtyf(t.qty)]:null,t.price?["Price",moneyX(t.price)]:null,
+      ["Type",esc(t.type)],t.via?["Paid via",esc(t.via==="Balance"?"Account balance":t.via)]:null,t.bank?["Bank",esc(t.bank)]:null,t.tds?["TDS deducted (your income, paid as tax)",moneyX(t.tds)]:null,t.pr?["Principal part",moneyX(t.pr)]:null,t.net?["Reached the bank",moneyX(t.net)]:null,t.note2?["Note",esc(t.note2)]:null,t.id&&!t.pending?["Entry",esc(t.id)]:null])}
     <div class="s">${t.pending?"Waiting to sync":link?`<a href="${esc(link)}" target="_blank" rel="noopener">Open in the sheet</a>`:""}</div>
     ${t.internal?"":`<div class="btns"><button class="x" type="button" id="tDel">Delete entry</button></div>`}${closeBtn}`);
   const del=$("tDel"); if(del) del.onclick=()=>confirmSheet("Delete this entry?",`${txTitle(t)} · ${fmtD(t.date)}. It is removed from the Ledger in your sheet.`,"Delete",()=>{
@@ -854,7 +864,8 @@ function chargesBody(){ const Y=chargeYears(WHO), tot=SUM(Y,x=>x.tot);
       <span class="m">${x.rec?`<span class="tag neo">Reconciled</span> with Groww statement · ${esc(x.rec.at||"")}`:x.est?`<span class="tag due">Estimated ${esc(rs(x.est,false))}</span> · upload the ${fyL(x.fy)} statements to make it exact`:`From Groww's ledger · ${x.n} entries`}</span>
       ${x.rec&&x.rec.items?`<div class="brk">${CHL.filter(([k])=>+x.rec.items[k]).map(([k,l])=>`<span>${l}<b>${esc(rs(+x.rec.items[k],false))}</b></span>`).join("")}</div>`:""}</div>`).join(""):`<div class="empty">No charges recorded yet.</div>`)
     +`<button class="ai" data-act="chg-up">${svgI("spark","var(--neon2)")}<span><b>Reconcile with Groww statements</b><small>Upload the FY's Stocks P&L report and ledger statement · Claude works out the exact charges</small></span></button>
-    <p class="hint">New trades use Groww's published rates as an estimate; the statement replaces that with the real figure for the year (one adjusting entry per year).</p>`; }
+    <p class="hint">New trades use Groww's published rates as an estimate; the statement replaces that with the real figure for the year (one adjusting entry per year).</p>`
+    +`<div class="gh" style="margin-top:18px"><span>Every charge</span></div>`+yearList(byNewest(M.tx.filter(t=>t.type==="Charges"&&t.date&&okWho(t.who,WHO))),"c",null); }
 /* ---------- broker balance ledger: every rupee in and out of the Groww balance, with a running total ---------- */
 const BALSG={"Add money":1,"Sell":1,"Redeem":1,"Dividend":1,"Other income":1,"F&O result":1,"Withdraw":-1,"Buy":-1,"Charges":-1};
 function balLedger(u){ const seen=new Set(), L=[];
@@ -872,7 +883,7 @@ function balanceBody(){ const X=balUnits();
     return `<div class="balc"><div class="l">${esc(u.acct)}${u.who!==holderOf(u.acct)?` · ${esc(u.who)}'s money`:""}</div><div class="v num ${cur<0?"loss":""}">${money(cur,false)}</div>
       <div class="s">Cash in the balance by Artha's count · charges on new trades are estimates</div><button class="btn2" data-act="bal-fix" data-u="${esc(k)}">Correct to ${esc(platOf(u.acct)||"the app")}'s figure</button></div>
       <div class="grp">${show.map(({t,v,b})=>`<button class="tx" data-tx="${t.i}"><span class="n">${esc(balTitle(t))}</span><span class="amt num ${v<0?"loss":""}">${v<0?"−":"+"}${money(Math.abs(v),false)}</span>
-        <span class="m"><span>${esc(fmtDs(t.date))}${t.trade?" · "+esc(qtyf(t.trade.qty)+" @ "+rs(t.trade.price,false)):""}</span><span class="num">Balance ${money(b,false)}</span>${t.pending?`<span class="chip sync">Syncing…</span>`:""}</span></button>`).join("")}</div>
+        <span class="m"><span>${esc(fmtDs(t.date))}${t.trade?" · "+esc(qtyf(t.trade.qty)+" @ "+rsx(t.trade.price)):""}</span><span class="num">Balance ${money(b,false)}</span>${t.pending?`<span class="chip sync">Syncing…</span>`:""}</span></button>`).join("")}</div>
       ${R.length>show.length?`<button class="more" data-act="bal-all">Show all ${R.length} entries ›</button>`:""}`; }).join("")
     +`<p class="hint">Tap an entry to edit or delete it</p>`; }
 function fixBalance(k){ const x=balUnits().find(y=>y.u.acct+"|"+y.u.who===k)||balUnits()[0]; if(!x) return; const {u,L}=x, cur=L[L.length-1].b, pl=platOf(u.acct)||"the app";

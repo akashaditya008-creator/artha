@@ -16,6 +16,8 @@ LED = [
     ["L0001", "2024-01-05", "Aditya", "Groww · Aditya", "Cash", "Add money", "", "", "", "", 100000, "Bank", "[bank TestBank]"],
     ["L0002", "2024-01-06", "Aditya", "Groww · Aditya", "Stocks", "Buy", "Grasim Industries", "GRASIM", 10, 3157, 31570, "Balance", ""],
     ["L0003", "2024-06-06", "Aditya", "Groww · Aditya", "Stocks", "Sell", "Grasim Industries", "GRASIM", 4, 3400, -13600, "Balance", ""],
+    ["L0009", "2026-11-08", "Aditya", "Groww · Aditya", "Stocks", "Buy", "Ujjivan Small Finance Bank", "UJJIVANSFB", 400, 60.33, 24132, "Balance", ""],
+    ["L0010", "2026-11-08", "Aditya", "Groww · Aditya", "Stocks", "Charges", "", "", "", "", 61, "Balance", "Brokerage, STT & charges (estimated)"],
     ["L0004", "2024-02-01", "Aditya", "Groww · Aditya", "Mutual Funds", "Buy", "Axis Nifty Next 50 Index Fund Direct Growth", "", "", "", 5000, "Bank", ""],
     ["L0005", "2024-03-01", "Spardha", "Wint · Spardha", "Bonds", "Buy", "Keertana Finserv Secured NCD Series 4", "", "", "", 100000, "Bank",
      "[reps 2024-09-01:9000,2025-03-01:9000,2025-09-01:9000,2026-03-01:9000,2026-09-01:9000,2027-03-01:9000]"],
@@ -107,6 +109,22 @@ def main():
             for t in tabs:
                 if t: click(f'#sTabs [data-t="{t}"]')
                 look(f"{c} › {t or 'main'}")
+                if c == "Stocks" and t == "History":
+                    txt = pg.evaluate("document.getElementById('scrBody').innerText")
+                    for bad in ["Brokerage", "Money added", "Every entry you"]:
+                        if bad in txt: FAIL.append(f"Stocks › History still shows '{bad}'"); print(f"FAIL Stocks › History shows '{bad}'")
+                    y = pg.evaluate("(document.querySelector('#scrBody [data-yr][aria-expanded=\"true\"]')||{}).dataset?.yr")
+                    click(f'#scrBody [data-yr="{y}"]'); pg.wait_for_timeout(300)
+                    if pg.evaluate(f"document.querySelector('#scrBody [data-yr=\"{y}\"]').getAttribute('aria-expanded')") != "false":
+                        FAIL.append("Stocks › History: tapping the open year does not collapse it"); print("FAIL year collapse")
+                    else: print("PASS Stocks › History: year collapses, no charges or cash moves")
+                    click(f'#scrBody [data-yr="{y}"]'); pg.wait_for_timeout(300)
+                    pg.evaluate("[...document.querySelectorAll('#scrBody .tx')].find(b=>b.innerText.includes('Ujjivan')).click()"); pg.wait_for_timeout(400)
+                    det = pg.evaluate("document.getElementById('eBox').innerText")
+                    ok_ = "60.33" in det and "24,132" in det
+                    print(("PASS" if ok_ else "FAIL") + " detail page shows the exact price (60.33)")
+                    if not ok_: FAIL.append("detail page does not show the exact price 60.33")
+                    back()
             back()
         click("#tabIns"); look("Home · insurance")
         for pid in pg.evaluate("[...new Set([...document.querySelectorAll('#viewIns [data-pol]')].map(b=>b.dataset.pol))]"):
