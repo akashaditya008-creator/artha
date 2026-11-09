@@ -1,7 +1,7 @@
 /* Artha 3.9 — investments + insurance. Data lives in the "Artha – My Investments" Google Sheet via the Apps Script API. */
 (()=>{
 "use strict";
-const APP_VERSION="3.11.0";
+const APP_VERSION="3.11.1";
 /* Personal details (banks, platforms, the Claude project link) come from the backend after sign-in, so this public code holds none. */
 const CFG=()=>(typeof DATA!=="undefined"&&DATA&&DATA.cfg)||{};
 const PROJECT_URL=()=>{ const u=safeUrl(CFG().project); return u==="#"?"https://claude.ai/projects":u; };
@@ -1249,6 +1249,9 @@ function drawDet(){
   const hsel=heldH.find(h=>h.name===d.name)||null;
   if(d.amt==null) d.amt=amtNum()?String(amtNum()):""; if(d.net==null) d.net="";
   const bondsHere=(isBond||fd)&&!inv?M.bonds.filter(b=>!b.closed&&b.acct===d.acct).map(b=>b.name):[];
+  /* fund quick picks: funds held now (any account), this account + whose money first; ELSS left out (no new money goes there) */
+  const mfPicks=mf&&inv?(()=>{ const m=new Map(); M.hold.filter(h=>h.asset==="Mutual Funds"&&h.qty>0&&h.name&&!/elss|tax ?saver/i.test(h.name)).forEach(h=>{ const k=keyName(h.name), sc=(h.acct===d.acct&&h.who===A.who?3e9:h.acct===d.acct?2e9:1e9)+(h.cur||0), o=m.get(k); if(!o||sc>o.sc) m.set(k,{name:h.name,sc}); });
+    return [...m.values()].sort((a,b)=>b.sc-a.sc).map(x=>x.name); })():[];
   const names=[...new Set(held.concat(bondsHere,recentOf("name",t=>t.acct===d.acct&&t.asset===T[3])))], nameL=isBond?"Bond name":fd?"Bank / FD name":mf?"Fund":oth?"What is it":"Stock";
   if(!d.reps) d.reps=[{d:"",a:""}]; if(d.remind==null) d.remind=remindPref(); if(!d.fdPay) d.fdPay="end"; if(!d.comp) d.comp=fd?"q":"y"; if(!d.ret) d.ret="rate"; if(!d.till) d.till="date";
   const keep=()=>{ const g=id=>$(id)?$(id).value:undefined; ["name","note","qty","rate","end","amt","net","px","exp"].forEach(k=>{ const v=g("d"+k[0].toUpperCase()+k.slice(1)); if(v!==undefined) d[k]=v; }); const o=g("dAcctO"); if(o!==undefined) d.acct=o.trim();
@@ -1263,7 +1266,7 @@ function drawDet(){
   $("aDet").innerHTML=`<div class="sumline"><span><small style="display:block;color:var(--muted);font-size:12px">${esc(label)} · ${A.date===TODAY()?"today":fmtD(A.date)}</small>${verb}</span><b class="num" id="dSum">${sumAmt}</b></div>
     <button class="ai sm" id="dDoc" type="button">${svgI("spark","var(--neon2)")}<span><b>${isBond&&inv?"Fill from screenshots":"Upload a document or screenshot"}</b><small>${isBond&&inv?"Claude reads the name, repayment dates, principal and interest":"Claude reads it and fills this entry for you to check"}</small></span></button>
     ${stock||mf||oth?`<label class="fld"><span>${heldH.length?nameL+" · from your holdings":nameL}</span>${heldH.length?`<select id="dName">${heldH.map(h=>`<option value="${esc(h.name)}"${h.name===d.name?" selected":""}>${esc(h.name)} · ${qtyf(h.qty)} ${mf?"units":"shares"} · ${esc(rs(h.cur,false))}</option>`).join("")}</select>`
-      :`<input id="dName" list="dNames" value="${esc(d.name||"")}" maxlength="120" autocomplete="off" placeholder="${oth?"e.g. PPF, Post office MIS, P2P, gold, chit fund":""}"><datalist id="dNames">${names.map(n=>`<option value="${esc(n)}">`).join("")}</datalist>`}</label>`:""}
+      :`<input id="dName" list="dNames" value="${esc(d.name||"")}" maxlength="120" autocomplete="off" placeholder="${oth?"e.g. PPF, Post office MIS, P2P, gold, chit fund":""}">${mfPicks.length?"":`<datalist id="dNames">${names.map(n=>`<option value="${esc(n)}">`).join("")}</datalist>`}`}</label>${mfPicks.length&&!heldH.length?`<div class="seg sm wrap picks" id="dPick">${mfPicks.map(n=>`<button type="button" data-n="${esc(n)}" aria-pressed="${keyName(n)===keyName(d.name||"")}">${esc(n)}</button>`).join("")}</div>`:""}`:""}
     ${stock?`<div class="btns"><label class="fld"><span>Number of shares</span><input id="dQty" inputmode="decimal" value="${esc(d.qty||"")}" autocomplete="off"></label><label class="fld"><span>${inv?"Cost":"Price"} per share ₹</span><input id="dPx" inputmode="decimal" value="${esc(d.px||"")}" autocomplete="off"></label></div>
       ${hsel?`<button type="button" class="addr" id="dAll">Sell all ${qtyf(hsel.qty)} shares</button>`:""}
       ${!inv?`<label class="fld"><span>Received after charges (optional)</span><input id="dNet" inputmode="decimal" value="${esc(d.net||"")}" placeholder="From the contract note" autocomplete="off"></label>`:""}<div class="calc" id="dCalc"></div>`:""}
@@ -1289,6 +1292,8 @@ function drawDet(){
   seg("dBank",v=>{ if(v==="__more"){ d.bankMore=1; return; } if(v==="__bal") d.via="Balance"; else { d.via="Bank"; d.bank=v; } });
   seg("dFdPay",v=>d.fdPay=v); seg("dRet",v=>d.ret=v); seg("dTill",v=>d.till=v); seg("dComp",v=>d.comp=v); seg("dOPay",v=>d.fdPay=v); seg("dKind",v=>d.kind=v);
   const nm=$("dName"); if(nm&&nm.tagName==="SELECT") nm.onchange=()=>{ keep(); d.qty=""; drawDet(); };
+  const pk=$("dPick"); if(pk&&nm){ const bs=[...pk.querySelectorAll("[data-n]")], flt=()=>{ const q=keyName(nm.value), ex=bs.find(b=>b.dataset.n===nm.value); bs.forEach(b=>{ b.setAttribute("aria-pressed",b===ex?"true":"false"); b.hidden=!!q&&!ex&&!keyName(b.dataset.n).includes(q)&&!b.dataset.n.toLowerCase().includes(nm.value.trim().toLowerCase()); }); };
+    bs.forEach(b=>b.onclick=()=>{ nm.value=b.dataset.n; d.name=nm.value; flt(); nm.blur(); }); nm.addEventListener("input",flt); flt(); }
   const all=$("dAll"); if(all) all.onclick=()=>{ keep(); d.qty=String(r4(hsel.qty)); drawDet(); };
   const calc=()=>{ const el=$("dCalc"); if(!el) return; const v=id=>numIn($(id)?$(id).value:""), sum=$("dSum");
     if(stock){ const T2=tradeCalc(inv,v("dQty"),v("dPx"),v("dNet"),d.acct,type==="us");
