@@ -1,8 +1,29 @@
 <!doctype html>
 <html lang="en">
 <head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-pvT7r9alClEPf7ljwRnpbcfNUA1LLUznw6lK/OChEGQ=' 'sha256-VqoIcaAAa9vnvg5yIKNbS1/YbFJGqViCtTg/lwS2alM=' https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com/gsi/style; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' https://script.google.com https://script.googleusercontent.com https://api.mfapi.in https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <script>try{var a=JSON.parse(localStorage.getItem("artha:acc")||"\"\"");if(a)document.documentElement.setAttribute("data-acc",a);if(JSON.parse(localStorage.getItem("artha:calm")||"false"))document.documentElement.classList.add("calm");}catch(e){}</script>
 <meta charset="utf-8">
+<script>
+/* Boot guard: if Artha hasn't started within 9 s, or an app file throws while starting, switch to the last
+   version that worked on this phone (once per session), otherwise show a recovery screen. Data lives in the sheet. */
+(function(){
+  function fail(m){ if(window.__arthaOK||document.getElementById("bootFail")) return;
+    var sw=navigator.serviceWorker&&navigator.serviceWorker.controller, tried=false; try{ tried=sessionStorage.getItem("arthaRolled")==="1"; }catch(e){}
+    if(sw&&!tried){ try{ sessionStorage.setItem("arthaRolled","1"); localStorage.setItem("artha:rolled",JSON.stringify(String(m||"").slice(0,140))); }catch(e){}
+      sw.postMessage({t:"rollback"}); setTimeout(function(){ location.reload(); },700); return; }
+    var d=document.createElement("div"); d.id="bootFail";
+    d.style.cssText="position:fixed;inset:0;z-index:99999;background:#04070C;color:#E8F3F7;font:15px/1.5 system-ui,sans-serif;display:grid;place-items:center;padding:28px;text-align:center";
+    d.innerHTML='<div style="max-width:340px"><div style="font-size:21px;font-weight:700;margin-bottom:8px">Artha couldn\'t start</div><p style="color:#8AA0AE;margin:0 0 6px">Your data is safe in your Google Sheet. Nothing was changed.</p><p style="color:#5D7180;font-size:12px;margin:0 0 18px">'+String(m||"").replace(/[<>&]/g,"").slice(0,160)+'</p><button id="bfRetry" style="font:600 16px system-ui;padding:13px 22px;border-radius:14px;border:0;background:#3CF0D4;color:#03100e;width:100%">Try again</button><button id="bfFresh" style="margin-top:10px;font:500 14px system-ui;padding:11px;border-radius:14px;border:1px solid rgba(130,220,255,.2);background:none;color:#E8F3F7;width:100%">Reload a fresh copy</button></div>';
+    (document.body||document.documentElement).appendChild(d);
+    document.getElementById("bfRetry").onclick=function(){ try{ sessionStorage.removeItem("arthaRolled"); }catch(e){} location.reload(); };
+    document.getElementById("bfFresh").onclick=function(){ try{ sessionStorage.removeItem("arthaRolled"); }catch(e){} if(sw) sw.postMessage({t:"live"}); setTimeout(function(){ location.replace(location.pathname+"?u="+Date.now()+location.hash); },400); };
+  }
+  window.__arthaFail=fail;
+  setTimeout(function(){ if(!window.__arthaOK) fail("It didn't finish loading."); },9000);
+  addEventListener("error",function(e){ if(!window.__arthaOK&&e&&e.filename&&e.filename.indexOf(location.origin)===0&&!/three\.min/.test(e.filename)) fail(e.message); });
+})();
+</script>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#04070C">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -11,7 +32,7 @@
 <link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icon-192.png"><link rel="apple-touch-icon" href="icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Sora:wght@400;600;700&display=swap">
-<link rel="stylesheet" href="app.css?v=3.8">
+<link rel="stylesheet" href="app.css?v=3.9">
 </head>
 <body>
 <canvas id="bg3d" aria-hidden="true"></canvas>
@@ -70,6 +91,7 @@
   <details class="dset"><summary>Settings</summary>
     <div><label class="k">Amounts</label><div class="seg" id="fAmt"></div></div>
     <div><label class="k">Look</label><div class="seg" id="fMotion"></div></div>
+    <div><label class="k">App lock</label><div class="seg" id="fLock"></div><p class="hint" id="fLockHint"></p></div>
     <div><label class="k">Glow colour</label><div class="skins" id="fAcc"></div></div>
     <div><label class="k">Your data</label><div class="grp2">
       <a class="lnk" id="sheetLink" href="#" target="_blank" rel="noopener">Open the Google Sheet <span>›</span></a>
@@ -121,13 +143,17 @@
 </div>
 
 <div class="esheet" id="eSheet" hidden><div class="box" id="eBox"></div></div>
-<div class="gate" id="gate" hidden><form id="gForm" autocomplete="off"><img class="logo" src="icon-192.png" alt=""><h2>Artha</h2><p id="gMsg">Enter the family passcode (once on this phone).</p>
+<div class="gate" id="gate" hidden><form id="gForm" autocomplete="off"><img class="logo" src="icon-192.png" alt=""><h2>Artha</h2><p id="gMsg">Sign in with your Google account (once on this phone).</p>
   <input id="gLink" type="url" placeholder="Paste the setup link" aria-label="Setup link" hidden>
-  <input id="gIn" type="password" autocomplete="off" aria-label="Passcode"><button type="submit">Open</button><div class="err" id="gErr" role="alert"></div></form></div>
+  <div id="gBtn" class="gbtn"></div>
+  <input id="gIn" type="password" autocomplete="off" aria-label="Passcode" placeholder="Family passcode" hidden><button type="submit" id="gGo" hidden>Open</button>
+  <div class="err" id="gErr" role="alert"></div></form></div>
+<div class="lock" id="lock" hidden><div class="lbox"><img class="logo" src="icon-192.png" alt=""><h2>Artha is locked</h2><p>Use your fingerprint or face to open.</p>
+  <button type="button" id="lockBtn">Unlock</button><button type="button" class="alt" id="lockAlt">Use Google sign-in instead</button><div class="err" id="lockErr" role="alert"></div></div></div>
 <div class="toast" id="toast" role="status" hidden></div>
 <input type="file" id="fileIn" hidden multiple>
 <script src="three.min.js" defer></script>
-<script src="scene.js?v=3.8" defer></script>
-<script src="app.js?v=3.8" defer></script>
+<script src="scene.js?v=3.9" defer></script>
+<script src="app.js?v=3.9" defer></script>
 </body>
 </html>

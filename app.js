@@ -1,7 +1,7 @@
-/* Artha 3.8 — investments + insurance. Data lives in the "Artha – My Investments" Google Sheet via the Apps Script API. */
+/* Artha 3.9 — investments + insurance. Data lives in the "Artha – My Investments" Google Sheet via the Apps Script API. */
 (()=>{
 "use strict";
-const APP_VERSION="3.8";
+const APP_VERSION="3.9";
 const PROJECT_URL="https://claude.ai/project/01a1965d-e312-704a-8114-16f0090c8706";
 const $=id=>document.getElementById(id);
 const store={get(k,d){try{const v=localStorage.getItem("artha:"+k);return v==null?d:JSON.parse(v);}catch(e){return d;}},set(k,v){try{localStorage.setItem("artha:"+k,JSON.stringify(v));}catch(e){}}};
@@ -14,7 +14,7 @@ const S3=window.Scene3D||{ok:false,theme(){},scroll(){},initBg(c){c.remove();},r
 /* ---------- endpoint (only from the private setup link) ---------- */
 function takeLink(s){ const m=/[#&?]k=([\w-]{20,})/.exec(s||"")||/\/macros\/s\/([\w-]{20,})\//.exec(s||""); if(!m) return false; store.set("api","https://script.google.com/macros/s/"+m[1]+"/exec"); return true; }
 if(takeLink(location.hash)) history.replaceState(null,"",location.pathname+location.search);
-const API=()=>store.get("api",""), PW=()=>store.get("pass","");
+const API=()=>store.get("api",""), PW=()=>store.get("tok","")||store.get("pass","");
 function call(action,extra){
   return fetch(API(),{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(Object.assign({action,pass:PW()},extra||{}))})
     .then(r=>r.json(),()=>{ const x=new Error("Couldn't reach Google just now. Check your internet."); x.net=true; throw x; })
@@ -688,12 +688,14 @@ function openGain(){ const R=HOME.map(h=>agg(h,WHO)).filter(r=>r.U.length);
 /* ---------- the bell: everything that needs you ---------- */
 function bellItems(){ const due=dueItems("all"), soon=soonItems("all",30), ib=recs("inbox").filter(r=>r.d.status==="new"||r.d.status==="ready"), ren=renewals(45);
   const chg=chargeYears("all").filter(x=>x.open), tds=tdsYears("all").filter(x=>x.due||x.status==="mismatch");
-  return {due,soon,ib,ren,chg,tds,n:due.length+ib.filter(r=>r.d.status==="ready").length+ren.filter(x=>x.left<=30).length+chg.filter(x=>x.ended).length+tds.length}; }
+  const dc=CHECKS();
+  return {due,soon,ib,ren,chg,tds,dc,n:dc.length+due.length+ib.filter(r=>r.d.status==="ready").length+ren.filter(x=>x.left<=30).length+chg.filter(x=>x.ended).length+tds.length}; }
 function paintBell(){ if(!M) return; const B=bellItems(); $("bellN").hidden=!B.n; $("bellN").textContent=B.n>9?"9+":B.n; $("bellBtn").classList.toggle("ring",B.n>0);
   $("dInboxS").innerHTML=recs("inbox").some(r=>r.d.status==="new")?`<span class="tag due">${recs("inbox").filter(r=>r.d.status==="new").length} waiting</span>`:"›"; }
 function openBell(){ const B=bellItems(), wait=B.ib.filter(r=>r.d.status==="new"), ready=B.ib.filter(r=>r.d.status==="ready");
   const row=(x,tag)=>`<button class="hl" data-pr="${esc(x.b.key)}|${x.e.d}"><span class="av" style="background:${tag==="due"?"var(--accent)":CLS.Bonds.col};color:#111">${dOf(x.e.d).getDate()}</span><div style="min-width:0"><div class="n">${esc(x.b.name)}</div><div class="m">${tag==="due"?"Due "+fmtD(x.e.d)+" · did it arrive?":"Due "+fmtD(x.e.d)}</div></div><div class="r"><b class="num">${x.e.a?money(x.e.a,true):"—"}</b><small>${tag==="due"?`<span class="tag due">Confirm</span>`:"expected"}</small></div></button>`;
   let h=`<div class="t big">Needs attention</div>`;
+  if(B.dc.length) h+=`<div class="gh"><span>Data checks · phone vs sheet</span><b class="num">${B.dc.length}</b></div><div class="list">${B.dc.map(x=>`<button class="hl" data-dc="${esc(x.id)}"><span class="av" style="background:${x.sev==="bad"?"#FF5D73":"var(--accent)"};color:#111">${svgI("check","#111",18)}</span><div style="min-width:0"><div class="n">${esc(x.title)}</div><div class="m">${esc(x.sub)}</div></div><div class="r"><small><span class="tag ${x.sev==="bad"?"bad":"due"}">${x.sev==="bad"?"Fix":"Check"}</span></small></div></button>`).join("")}</div>`;
   if(ready.length) h+=`<div class="gh"><span>Claude has read · review</span><b class="num">${ready.length}</b></div><div class="list">${ready.map(inboxRow).join("")}</div>`;
   if(B.due.length) h+=`<div class="gh"><span>Repayments to confirm</span><b class="num">${B.due.length}</b></div><div class="list">${B.due.map(x=>row(x,"due")).join("")}</div>`;
   if(B.ren.length) h+=`<div class="gh"><span>Insurance renewals</span><b class="num">${B.ren.length}</b></div><div class="list">${B.ren.map(x=>`<button class="hl" data-pol="${esc(x.pol.id)}"><span class="av" style="background:${polCol(x.pol)}">${svgI(polIcon(x.pol),"#fff",20)}</span><div style="min-width:0"><div class="n">${esc(x.pol.d.title)}</div><div class="m">${x.left<0?"Expired "+fmtD(x.end):"Ends "+fmtD(x.end)}</div></div><div class="r"><b class="num">${x.left<0?"—":x.left+"d"}</b><small><span class="tag ${x.left<0?"bad":"due"}">${x.left<0?"Expired":"Renew"}</span></small></div></button>`).join("")}</div>`;
@@ -701,9 +703,10 @@ function openBell(){ const B=bellItems(), wait=B.ib.filter(r=>r.d.status==="new"
   if(B.chg.length) h+=`<div class="gh"><span>Charges to make exact</span><b class="num">${B.chg.length}</b></div><div class="list">${B.chg.map(x=>`<button class="hl" data-chgb="${esc(x.acct)}|${x.fy}"><span class="av" style="background:${CLS.Stocks.col}">${svgI("file","#fff",18)}</span><div style="min-width:0"><div class="n">${fyL(x.fy)} · ${esc(x.acct)}</div><div class="m">${x.ended?"Upload Groww's P&L + ledger for the year":"Estimated so far · upload after the year ends"}</div></div><div class="r"><b class="num">${money(x.est,true)}</b><small><span class="tag ${x.ended?"due":"neo"}">${x.ended?"Upload":"Later"}</span></small></div></button>`).join("")}</div>`;
   if(wait.length) h+=`<div class="gh"><span>Waiting for Claude</span><b class="num">${wait.length}</b></div><div class="list">${wait.map(inboxRow).join("")}</div><button class="ai" id="bProc">${svgI("spark","var(--neon2)")}<span><b>Process now</b><small>Opens a new chat in your Artha project; send the message that's copied for you</small></span></button>`;
   if(B.soon.length) h+=`<div class="gh"><span>Coming up · 30 days</span><b class="num">${money(SUM(B.soon,x=>x.e.a),true)}</b></div><div class="list">${B.soon.map(x=>row(x,"soon")).join("")}</div>`;
-  if(!B.due.length&&!B.ib.length&&!B.ren.length&&!B.soon.length&&!B.tds.length&&!B.chg.length) h+=`<div class="empty">All clear. Nothing needs you right now.</div>`;
+  if(!B.dc.length&&!B.due.length&&!B.ib.length&&!B.ren.length&&!B.soon.length&&!B.tds.length&&!B.chg.length) h+=`<div class="empty">All clear. Nothing needs you right now.</div>`;
   h+=closeBtn;
   openE(h); const pb=$("bProc"); if(pb) pb.onclick=processNow;
+  $("eBox").querySelectorAll("[data-dc]").forEach(b=>b.onclick=()=>openCheck(b.dataset.dc));
   $("eBox").querySelectorAll("[data-tdsb]").forEach(b=>b.onclick=()=>{ const [fy,p2]=b.dataset.tdsb.split("|"); tdsUpload(+fy,p2); });
   $("eBox").querySelectorAll("[data-chgb]").forEach(b=>b.onclick=()=>{ const i=b.dataset.chgb.lastIndexOf("|"); chargesUpload({acct:b.dataset.chgb.slice(0,i),fy:+b.dataset.chgb.slice(i+1)}); }); }
 $("bellBtn").onclick=openBell;
@@ -1373,9 +1376,12 @@ function celebrate(title,sub){ if(navigator.vibrate) navigator.vibrate([10,40,18
 let loading=false, flushing=false;
 function setSync(kind,txt){ $("syncLine").className=kind||""; $("syncTxt").textContent=txt; }
 const fmtWhen=t=>{ if(!t) return "never"; const m=Math.round((Date.now()-t)/6e4); return m<1?"just now":m<60?m+" min ago":m<1440?Math.round(m/60)+" h ago":new Date(t).toLocaleDateString("en-IN",{day:"numeric",month:"short"}); };
-const liveLine=()=>`Synced ${fmtWhen(CACHE_AT)}`+(OUT.length?` · ${OUT.length} waiting`:"");
-function applyData(d){ if(!d) return; if(d.v!==3){ DATA=d; refresh(); setSync("warn","Paste the new Artha backend (v3) and run setupV3() to see your data"); return; } DATA=d; CACHE_AT=Date.now(); store.set("cache",d); store.set("cacheAt",CACHE_AT); refresh(); setSync(OUT.length?"warn":"live",liveLine()); refreshNavs(); }
+const liveLine=()=>`Synced ${fmtWhen(CACHE_AT)}`+(OUT.length?` · ${OUT.length} waiting`:"")+(FAILED.length?` · ${FAILED.length} not saved`:"")+(CHECKS().length?" · check the bell":"");
+function applyData(d){ if(!d) return; if(d.v!==3){ DATA=d; refresh(); setSync("warn","Paste the new Artha backend (v3) and run setupV3() to see your data"); return; }
+  const prev=DATA; DATA=d; CACHE_AT=Date.now(); store.set("cache",d); store.set("cacheAt",CACHE_AT); refresh(); setSync(OUT.length||FAILED.length?"warn":"live",liveLine()); refreshNavs();
+  reconcile(d,prev).catch(()=>{}); if(d.me==="Passcode"&&!store.get("tok","")) setTimeout(()=>askPass("Artha now uses Google sign-in. Sign in once on this phone; the passcode will stop working soon."),600); }
 function errText(e){ const m=String(e&&e.message||e||"");
+  if(/SIGNIN/.test(m)){ store.set("tok",""); askPass(m.replace(/^SIGNIN:\s*/,"")); return "Please sign in."; }
   if(/PASSCODE/.test(m)){ store.set("pass",""); askPass("Wrong passcode. 3 wrong tries lock Artha for 3 hours."); return "Passcode needed."; }
   if(/Locked/.test(m)){ if(!$("gate").hidden) $("gErr").textContent=m; return m; } return m||"Couldn't reach Google just now."; }
 const ACTION={add:"add",edit:"edit",del:"del",rec:"rec",cal:"cal"};
@@ -1384,20 +1390,128 @@ function flush(){ if(flushing||!PW()||!API()||!OUT.length) return;
   const it=OUT[0]; if(!ACTION[it.kind]){ OUT.shift(); saveOut(); flush(); return; }
   flushing=true;
   const e=it.kind==="add"?{rows:it.rows,rid:it.rid}:it.kind==="del"?{id:it.id,rid:it.rid}:it.kind==="edit"?{id:it.id,row:it.row,rid:it.rid}:{ops:it.ops,rid:it.rid};
-  call(ACTION[it.kind],{e}).then(d=>{ flushing=false; OUT.splice(OUT.indexOf(it),1); saveOut(); applyData(d); flush(); },x=>{ flushing=false; const m=String(x&&x.message||x);
-    if(x&&x.net){ setSync("warn",`Offline · ${OUT.length} waiting to sync`); return; } if(/PASSCODE|Locked/.test(m)){ setSync("warn",errText(x)); return; }
+  if(!it.at){ it.at=Date.now(); saveOut(); }
+  call(ACTION[it.kind],{e}).then(d=>{ flushing=false; OUT.splice(OUT.indexOf(it),1); saveOut(); verifyWrite(it,d); applyData(d); flush(); },x=>{ flushing=false; const m=String(x&&x.message||x);
+    if(x&&x.net){ setSync("warn",`Offline · ${OUT.length} waiting to sync`); return; } if(/SIGNIN|PASSCODE|Locked/.test(m)){ setSync("warn",errText(x)); return; }
     if(/Unknown action/i.test(m)){ setSync("warn","Waiting for the Artha backend update · "+OUT.length+" saved on this phone"); return; }
-    OUT.splice(OUT.indexOf(it),1); saveOut(); refresh(); showToast(`Not saved: ${m}`,7000); flush(); }); }
+    /* the sheet refused it: keep it on this phone (bell › Data checks) instead of losing it */
+    OUT.splice(OUT.indexOf(it),1); saveOut(); FAILED.push(Object.assign({},it,{err:m,failedAt:Date.now()})); saveFailed(); refresh(); showToast(`Not saved: ${m} · kept in the bell to retry`,7000); flush(); }); }
 
 addEventListener("online",()=>{ flush(); pull(); });
 function pull(){ if(loading) return Promise.resolve(); if(!API()){ askPass(null,true); return Promise.resolve(); } if(!PW()){ askPass(); return Promise.resolve(); } flush(); loading=true;
   setSync("busy",DATA?`Synced ${fmtWhen(CACHE_AT)} · updating…`:"Loading your sheet…");
   return call("get").then(d=>{ loading=false; applyData(d); flush(); },e=>{ loading=false; const m=errText(e);
     setSync("warn",e&&e.net&&DATA?`Offline · copy from ${fmtWhen(CACHE_AT)}`:m); }); }
-function askPass(msg,needLink){ const need=needLink||!API(); $("gLink").hidden=!need; $("gMsg").textContent=need?"Open the private setup link once, or paste it here with the family passcode.":"Enter the family passcode (once on this phone).";
-  $("gErr").textContent=msg||""; $("gate").hidden=false; setTimeout(()=>(need?$("gLink"):$("gIn")).focus(),50); }
-$("gForm").addEventListener("submit",e=>{ e.preventDefault(); if(!$("gLink").hidden&&!takeLink($("gLink").value)){ $("gErr").textContent="That doesn't look like the Artha setup link."; return; }
+/* ---------- sign in with Google: the backend checks the account and gives this phone its own session key ---------- */
+const CLIENT_ID="816088287548-9r600bocno2f00uf2p319cdg0f8bcov7.apps.googleusercontent.com";
+let gsi=null;
+function loadGSI(){ return gsi||(gsi=new Promise((ok,bad)=>{ const s=document.createElement("script"); s.src="https://accounts.google.com/gsi/client"; s.async=true; s.onload=ok; s.onerror=()=>{ gsi=null; bad(); }; document.head.appendChild(s); })); }
+function askPass(msg,needLink){ const need=needLink||!API(); $("gLink").hidden=!need;
+  $("gMsg").textContent=need?"Open the private setup link once (or paste it here), then sign in with Google.":"Sign in with your Google account (once on this phone).";
+  $("gErr").textContent=msg||""; $("gate").hidden=false; $("gIn").hidden=true; $("gGo").hidden=!need;
+  if(need){ setTimeout(()=>$("gLink").focus(),50); $("gBtn").innerHTML=""; return; }
+  loadGSI().then(()=>{ google.accounts.id.initialize({client_id:CLIENT_ID,callback:onCred,ux_mode:"popup",auto_select:true,itp_support:true});
+    const b=$("gBtn"); b.innerHTML=""; google.accounts.id.renderButton(b,{theme:"filled_blue",size:"large",shape:"pill",text:"signin_with",width:260}); })
+  .catch(()=>{ $("gErr").textContent="Couldn't load Google sign-in. Check your internet and reopen Artha."; }); }
+function onCred(resp){ $("gErr").textContent="Signing in…";
+  call("login",{e:{idToken:resp.credential}}).then(d=>{ store.set("tok",d.tok); store.set("me",d.name); store.set("email",d.email); store.set("pass","");
+      $("gErr").textContent=""; $("gate").hidden=true; LOCK.unlock(); showToast(`Signed in as ${d.name}`); pull(); if(LOCK.can()&&!store.get("bioId","")&&!store.get("bioAsked",false)) setTimeout(offerLock,900); },
+    e=>{ const m=String(e&&e.message||e);
+      if(/Unknown action/i.test(m)){ $("gErr").textContent="Google sign-in isn't switched on in the backend yet. Use the family passcode for now."; $("gIn").hidden=false; $("gGo").hidden=false; $("gIn").focus(); return; }
+      $("gErr").textContent=m.replace(/^SIGNIN:\s*/,""); }); }
+$("gForm").addEventListener("submit",e=>{ e.preventDefault();
+  if(!$("gLink").hidden){ if(!takeLink($("gLink").value)){ $("gErr").textContent="That doesn't look like the Artha setup link."; return; } $("gLink").value=""; if($("gIn").hidden){ askPass(); return; } }
   const v=$("gIn").value.trim(); if(!v){ $("gErr").textContent="Enter the passcode."; return; } store.set("pass",v); $("gate").hidden=true; $("gIn").value=""; pull(); });
+
+/* ---------- app lock: the phone's own fingerprint / face check (WebAuthn, nothing leaves the phone) ---------- */
+const b64u=b=>btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+const ub64=s=>Uint8Array.from(atob(s.replace(/-/g,"+").replace(/_/g,"/")),c=>c.charCodeAt(0));
+const LOCK={ locked:false, hiddenAt:0, AFTER:60000,
+  can:()=>!!(window.PublicKeyCredential&&navigator.credentials&&window.isSecureContext),
+  on:()=>!!store.get("bioId",""),
+  show(){ if(!LOCK.on()) return; LOCK.locked=true; document.documentElement.classList.add("locked"); $("lock").hidden=false; $("lockErr").textContent=""; },
+  unlock(){ LOCK.locked=false; document.documentElement.classList.remove("locked","veil"); $("lock").hidden=true; } };
+async function bioCreate(){ const cred=await navigator.credentials.create({publicKey:{challenge:crypto.getRandomValues(new Uint8Array(32)),rp:{name:"Artha"},
+  user:{id:crypto.getRandomValues(new Uint8Array(16)),name:store.get("email","")||"artha",displayName:"Artha · "+(store.get("me","")||"me")},
+  pubKeyCredParams:[{type:"public-key",alg:-7},{type:"public-key",alg:-257}],
+  authenticatorSelection:{authenticatorAttachment:"platform",userVerification:"required",residentKey:"discouraged"},timeout:60000,attestation:"none"}});
+  if(!cred) throw new Error("Not set up"); store.set("bioId",b64u(cred.rawId)); }
+async function bioCheck(){ const a=await navigator.credentials.get({publicKey:{challenge:crypto.getRandomValues(new Uint8Array(32)),allowCredentials:[{type:"public-key",id:ub64(store.get("bioId",""))}],userVerification:"required",timeout:60000}});
+  if(!a||!(new Uint8Array(a.response.authenticatorData)[32]&4)) throw new Error("Fingerprint or face wasn't confirmed."); }
+async function unlockNow(){ $("lockErr").textContent=""; try{ await bioCheck(); LOCK.unlock(); if(Date.now()-CACHE_AT>60000) pull(); }catch(e){ $("lockErr").textContent=e&&e.name==="NotAllowedError"?"Cancelled. Tap Unlock to try again.":String(e&&e.message||e); } }
+$("lockBtn").onclick=unlockNow;
+$("lockAlt").onclick=()=>{ store.set("tok",""); $("lock").hidden=true; askPass("Sign in with Google to open Artha."); };
+function lockOnStart(){ if(LOCK.on()){ LOCK.show(); setTimeout(unlockNow,350); } }
+function offerLock(){ store.set("bioAsked",true);
+  openE(`<div class="t big">Lock Artha with your fingerprint?</div><div class="s" style="text-align:left">Artha will ask for your fingerprint or face each time you open it, and after a minute in the background. You can turn it off in the menu.</div><button class="go" type="button" id="olY">Turn on</button><button class="x" type="button" id="olN">Not now</button>`);
+  $("olY").onclick=async()=>{ try{ await bioCreate(); ov.back(); showToast("Fingerprint lock is on"); buildDrawer&&isOpen($("drawer"))&&buildDrawer(); }catch(e){ showToast(e&&e.name==="NotAllowedError"?"Cancelled":"This phone couldn't set up the lock: "+(e&&e.message||e),5000); } };
+  $("olN").onclick=()=>ov.back(); }
+async function setLock(on){ if(on){ if(!LOCK.can()){ showToast("This browser can't use the fingerprint lock."); return; } try{ await bioCreate(); showToast("Fingerprint lock is on"); }catch(e){ showToast(e&&e.name==="NotAllowedError"?"Cancelled":"Couldn't set it up: "+(e&&e.message||e),5000); } }
+  else { try{ await bioCheck(); store.set("bioId",""); showToast("Fingerprint lock is off"); }catch(e){ showToast("Confirm with your fingerprint to turn the lock off.",4000); } }
+  buildDrawer(); }
+/* amounts are veiled the moment Artha goes to the background (app switcher), and it locks after a minute away */
+document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="hidden"){ LOCK.hiddenAt=Date.now(); if(LOCK.on()) document.documentElement.classList.add("veil"); }
+  else { if(LOCK.on()&&LOCK.hiddenAt&&Date.now()-LOCK.hiddenAt>LOCK.AFTER){ LOCK.show(); setTimeout(unlockNow,300); } else if(!LOCK.locked) document.documentElement.classList.remove("veil"); } });
+
+/* ---------- saves that the sheet refused: kept here until retried or discarded ---------- */
+let FAILED=store.get("failed",[]); const saveFailed=()=>store.set("failed",FAILED);
+let ISSUES=store.get("issues",[]); const saveIssues=()=>store.set("issues",ISSUES.slice(-80));
+function issue(x){ if(ISSUES.some(i=>i.key===x.key)) return; ISSUES.push(Object.assign({id:rid(),at:Date.now()},x)); saveIssues(); }
+const descRow=r=>r?`${r.type||r[5]} · ${r.name||r[6]||r.asset||r[4]||""} · ₹${Number(r.amt!=null?r.amt:r[10]||0).toLocaleString("en-IN")} · ${r.date||r[1]||"no date"} · ${r.acct||r[3]||""}`:"";
+/* everything the bell shows under "Data checks" */
+function CHECKS(){ const L=[];
+  FAILED.forEach(f=>L.push({id:"f:"+f.rid,sev:"bad",title:"Not saved to the sheet",sub:`${f.kind==="add"?(f.rows||[]).map(descRow).join("; "):f.kind+" "+(f.id||"")} · ${f.err}`}));
+  OUT.filter(o=>o.at&&Date.now()-o.at>864e5).forEach(o=>L.push({id:"o:"+o.rid,sev:"due",title:"Waiting to sync for over a day",sub:o.kind==="add"?(o.rows||[]).map(descRow).join("; "):o.kind}));
+  ISSUES.forEach(i=>L.push({id:"i:"+i.id,sev:i.sev||"due",title:i.title,sub:i.sub}));
+  ((DATA&&DATA.chk)||[]).forEach(c=>L.push({id:"c:"+c[0],sev:"due",title:`Sheet row ${c[1]} (${c[0]}) needs fixing`,sub:c[2]+" · fix it in the sheet; Artha may count it wrongly until then"}));
+  return L; }
+function openCheck(cid){ const x=CHECKS().find(c=>c.id===cid); if(!x) return; const k=cid.slice(0,2);
+  let btns=`<button class="x" type="button" data-close>Close</button>`;
+  if(k==="f:") btns=`<button class="go" type="button" id="ckRetry">Try saving again</button><button class="x danger" type="button" id="ckDrop">Discard this change</button>`+btns;
+  if(k==="i:") btns=`<button class="go" type="button" id="ckOk">I've checked it · dismiss</button>`+btns;
+  if(k==="c:"&&M&&M.url) btns=`<a class="go" href="${esc(M.url)}" target="_blank" rel="noopener">Open the sheet</a>`+btns;
+  const it=k==="i:"?ISSUES.find(i=>"i:"+i.id===cid):null;
+  openE(`<div class="t big">${esc(x.title)}</div><div class="s" style="text-align:left;white-space:pre-wrap">${esc(it&&it.detail||x.sub)}</div>${btns}`);
+  const r=$("ckRetry"); if(r) r.onclick=()=>{ const f=FAILED.find(f=>"f:"+f.rid===cid); FAILED=FAILED.filter(z=>z!==f); saveFailed(); if(f){ delete f.err; delete f.failedAt; f.rid=rid(); OUT.push(f); saveOut(); } ov.back(); refresh(); flush(); };
+  const dr=$("ckDrop"); if(dr) dr.onclick=()=>confirmSheet("Discard this change?","It was never saved to the sheet. Discarding removes it from this phone too.","Discard",()=>{ FAILED=FAILED.filter(f=>"f:"+f.rid!==cid); saveFailed(); ov.back(); ov.back(); refresh(); });
+  const ok=$("ckOk"); if(ok) ok.onclick=()=>{ ISSUES=ISSUES.filter(i=>"i:"+i.id!==cid); saveIssues(); ov.back(); refresh(); }; }
+
+/* ---------- confirm every save: the sheet's copy must match what this phone sent ---------- */
+const same=(a,b)=>Math.abs((+a||0)-(+b||0))<0.005;
+function verifyWrite(it,d){ if(!d||!d.led) return; const byId=new Map(d.led.map(r=>[r[0],r]));
+  const bad=(title,detail)=>issue({key:"v:"+it.rid,sev:"bad",title,sub:"Saved, but the sheet's copy differs · tap to see",detail});
+  if(it.kind==="add"&&Array.isArray(d.added)){ const rows=it.rows||[];
+    if(d.added.length!==rows.length) return bad("Some entries may not have saved",`Sent ${rows.length}, the sheet confirmed ${d.added.length}.\n`+rows.map(descRow).join("\n"));
+    const off=rows.map((r,i)=>{ const s=byId.get(d.added[i]); return !s?`${d.added[i]}: missing in the sheet`:(!same(s[10],r.amt)||s[1]!==r.date||s[5]!==r.type||s[3]!==r.acct)?`${d.added[i]}: sent ${descRow(r)} · sheet has ${descRow(s)}`:""; }).filter(Boolean);
+    if(off.length) bad("A saved entry doesn't match",off.join("\n")); }
+  if(it.kind==="edit"&&it.row){ const s=byId.get(it.id); if(!s) bad("An edited entry is missing",`${it.id} isn't in the sheet after the edit.`);
+    else if(!same(s[10],it.row.amt)||s[1]!==it.row.date||s[5]!==it.row.type) bad("An edit doesn't match",`${it.id}: sent ${descRow(it.row)} · sheet has ${descRow(s)}`); }
+  if(it.kind==="del"&&byId.has(it.id)) bad("A deleted entry is still in the sheet",`${it.id}: ${descRow(byId.get(it.id))}`);
+  if(it.kind==="rec"){ const ids=new Set((d.rec||[]).map(r=>r[0])); const miss=(it.ops||[]).filter(o=>!o.del&&!ids.has(o.id)); if(miss.length) bad("A record didn't save",miss.map(o=>o.title||o.id).join("\n")); } }
+
+/* ---------- reconciliation on every sync ----------
+   1. fingerprints: the phone recomputes the sheet's per-account count, total and SHA-256 from the rows it received;
+      any difference means the copy on this phone is incomplete or damaged.
+   2. outside edits: rows that changed since the last sync with no matching entry in the backend's Audit log
+      were changed directly in the sheet (or by something other than the app), so they are listed for a look. */
+async function sha16(s){ const b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(s)); return Array.from(new Uint8Array(b)).map(x=>x.toString(16).padStart(2,"0")).join("").slice(0,16); }
+const canon=r=>r.slice(0,13).map(v=>v===""||v==null?"":String(v)).join("\u001f");
+async function reconcile(d,prev){ if(!d.fp||!crypto.subtle) return;
+  const led=d.led.slice().sort((a,b)=>a[0]<b[0]?-1:a[0]>b[0]?1:0), U={}, all=[];
+  led.forEach(r=>{ const k=r[3]+"|"+r[2], c=canon(r); all.push(c); (U[k]||(U[k]={n:0,s:0,c:[]})); U[k].n++; U[k].s+=Number(r[10])||0; U[k].c.push(c); });
+  const diffs=[]; if(all.length!==d.fp.n||await sha16(all.join("\u001e"))!==d.fp.h){
+    const keys=new Set(Object.keys(U).concat(Object.keys(d.fp.u||{})));
+    for(const k of keys){ const a=U[k], b=(d.fp.u||{})[k]; const h=a?await sha16(a.c.join("\u001e")):"";
+      if(!a||!b||a.n!==b.n||!same(Math.round(a.s*100)/100,b.s)||h!==b.h) diffs.push(`${k.replace("|"," · ")}: phone ${a?a.n:0} rows ₹${a?Math.round(a.s).toLocaleString("en-IN"):0} · sheet ${b?b.n:0} rows ₹${b?Math.round(b.s).toLocaleString("en-IN"):0}`); } }
+  ISSUES=ISSUES.filter(i=>i.key!=="fp"); if(diffs.length) issue({key:"fp",sev:"bad",title:"Phone and sheet don't agree",sub:"Pull to refresh; if it stays, tap for details",detail:diffs.join("\n")}); saveIssues();
+  /* outside edits */
+  const snap=store.get("snap",null), now={}; led.forEach(r=>now[r[0]]=canon(r));
+  if(snap&&snap.rows&&Array.isArray(d.audit)){ const since=Date.parse(snap.at||0)-5*60000, seen=new Set(d.audit.filter(a=>Date.parse(a[0])>=since).map(a=>a[3]));
+    const prevRow=new Map(((prev&&prev.led)||[]).map(r=>[r[0],r])), ch=[];
+    Object.keys(now).forEach(id=>{ if(snap.rows[id]!==now[id]&&!seen.has(id)) ch.push(snap.rows[id]==null?`Added ${id}: ${descRow(d.led.find(r=>r[0]===id))}`:`Changed ${id}: was ${descRow(prevRow.get(id))||"?"} · now ${descRow(d.led.find(r=>r[0]===id))}`); });
+    Object.keys(snap.rows).forEach(id=>{ if(now[id]==null&&!seen.has(id)) ch.push(`Removed ${id}: ${descRow(prevRow.get(id))||"(details not on this phone)"}`); });
+    if(ch.length) issue({key:"x:"+d.at,sev:"due",title:`${ch.length} entr${ch.length===1?"y":"ies"} changed outside the app`,sub:"Edited straight in the sheet · tap to check they're right",detail:ch.slice(0,40).join("\n")+(ch.length>40?`\n…and ${ch.length-40} more`:"")}); }
+  store.set("snap",{at:d.at,rows:now}); paintBell(); setSync(OUT.length||FAILED.length?"warn":"live",liveLine()); }
 
 /* ---------- chrome: tabs, header, scroll, pull to refresh, drawer ---------- */
 let tt; function showToast(t,ms){ const el=$("toast"); el.textContent=t; el.hidden=false; el.style.animation="none"; void el.offsetWidth; el.style.animation=""; clearTimeout(tt); tt=setTimeout(()=>el.hidden=true,ms||2800); }
@@ -1423,6 +1537,8 @@ function buildDrawer(){
   $("dInsS").textContent=M?`${policies().length} polic${policies().length===1?"y":"ies"}`:"";
   segs("fAmt",[["short","Short ₹12.3L"],["full","Full ₹12,34,567"]],SHORT?"short":"full",v=>{ SHORT=v==="short"; store.set("amt",v); refresh(); });
   segs("fMotion",[["full","3D and motion"],["calm","Simple and still"]],store.get("calm",false)?"calm":"full",v=>setCalm(v==="calm"));
+  segs("fLock",[["on","Fingerprint"],["off","Off"]],LOCK.on()?"on":"off",v=>{ if((v==="on")!==LOCK.on()) setLock(v==="on"); });
+  $("fLockHint").textContent=LOCK.can()?(LOCK.on()?"Asks when you open Artha and after a minute away.":"Turn on to ask for your fingerprint or face when Artha opens."):"Not available in this browser.";
   const cur=store.get("acc",""); $("fAcc").innerHTML=ACC.map(([k,n,c])=>`<button type="button" aria-pressed="${cur===k}" data-k="${k}"><span class="sw" style="--a:${c}"></span>${n}</button>`).join("");
   $("fAcc").querySelectorAll("button").forEach(b=>b.onclick=()=>{ store.set("acc",b.dataset.k); if(b.dataset.k) document.documentElement.setAttribute("data-acc",b.dataset.k); else document.documentElement.removeAttribute("data-acc"); S3.ringColor(ACC.find(a=>a[0]===b.dataset.k)[2]); buildDrawer(); });
   $("sheetLink").href=M&&M.url||"#"; $("filesLink").href=M&&M.files||"#"; $("filesLink").hidden=!(M&&M.files);
@@ -1439,8 +1555,9 @@ $("dInbox").onclick=fromDrawer(()=>{ const L2=recs("inbox").filter(r=>r.d.status
   openE(`<div class="t big">Claude inbox</div><div class="s" style="text-align:left">Bond screenshots and policies you upload wait here until Claude reads them. Tap Process now, paste the copied message in the chat that opens, and send it.</div>${L2.length?`<div class="list">${L2.map(inboxRow).join("")}</div><button class="go" type="button" id="iAll">Process now</button>`:`<div class="empty">Nothing waiting.</div>`}${closeBtn}`);
   const b=$("iAll"); if(b) b.onclick=processNow; });
 $("forgetBtn").onclick=fromDrawer(()=>{ if(OUT.length){ showToast("Some changes are still waiting to sync. Go online first, then try again.",4500); return; }
-  confirmSheet("Forget this phone?","Artha will sign out here. You'll need the private setup link and the passcode to open it again. Nothing in your sheet is deleted.","Forget this phone",()=>{
-    ["api","pass","cache","cacheAt","outbox"].forEach(k=>{ try{localStorage.removeItem("artha:"+k);}catch(e){} }); location.reload(); }); });
+  confirmSheet("Forget this phone?","Artha will sign out here and forget its saved copy and fingerprint lock. You'll need the private setup link and Google sign-in to open it again. Nothing in your sheet is deleted.","Forget this phone",()=>{
+    const done=()=>{ ["api","pass","tok","me","email","bioId","bioAsked","cache","cacheAt","outbox","failed","issues","snap"].forEach(k=>{ try{localStorage.removeItem("artha:"+k);}catch(e){} }); location.reload(); };
+    if(store.get("tok","")) call("logout").then(done,done); else done(); }); });
 function eye(){ $("eyeP").setAttribute("d",HIDE?"M3 3l18 18M10.6 6.1A9.8 9.8 0 0 1 12 6c6.4 0 10 6 10 6a17 17 0 0 1-3.2 3.9M6.6 6.6C3.9 8.3 2 12 2 12s3.6 6 10 6c1.6 0 3-.3 4.3-.9":"M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"); $("eyeBtn").setAttribute("aria-label",HIDE?"Show amounts":"Hide amounts"); }
 $("eyeBtn").onclick=()=>{ HIDE=!HIDE; store.set("hide",HIDE); eye(); refresh(); }; eye();
 function refresh(){ build(); if(TAB_NOW==="ins") renderIns(); else renderHome(); paintBell(); if(isOpen($("drawer"))) buildDrawer(); if(SC&&isOpen($("scr"))) renderScr(); if(isOpen($("sheet"))) doSearch(); }
@@ -1455,11 +1572,14 @@ async function checkUpdate(manual){ try{ const j=await (await fetch("version.jso
     if(j.v&&j.v!==APP_VERSION){ UPD=j; if(manual||store.get("updLater")!==j.v) showUpd(); } else if(manual) showToast("You're on the latest version"); }
   catch(e){ if(manual) showToast("Couldn't check, you seem to be offline"); } }
 /* update = drop the old worker and every cached copy, then load fresh from the network (with a cache-busting address) */
-async function doUpdate(){ $("updBtn").textContent="Updating…"; try{ const regs=await navigator.serviceWorker?.getRegistrations?.()||[]; await Promise.all(regs.map(r=>r.scope.includes("/artha")?r.unregister():null)); const ks=await caches.keys(); await Promise.all(ks.filter(k=>k.startsWith("artha-")).map(k=>caches.delete(k))); }catch(e){} location.replace(location.pathname+"?u="+Date.now()+location.hash); }
+async function doUpdate(){ $("updBtn").textContent="Updating…"; try{ const regs=await navigator.serviceWorker?.getRegistrations?.()||[]; await Promise.all(regs.map(r=>r.scope.includes("/artha")?r.unregister():null)); const ks=await caches.keys(); await Promise.all(ks.filter(k=>k.startsWith("artha-")&&k!=="artha-good").map(k=>caches.delete(k))); try{ sessionStorage.removeItem("arthaRolled"); }catch(e){} }catch(e){} location.replace(location.pathname+"?u="+Date.now()+location.hash); }
 $("updBtn").onclick=doUpdate; $("updLater").onclick=()=>{ if(UPD) store.set("updLater",UPD.v); clearTimeout(updT); $("upd").hidden=true; showToast("OK. Menu › Check for updates whenever you're ready"); };
 $("verBtn").onclick=()=>checkUpdate(true); setTimeout(checkUpdate,2500);
 document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="visible"){ checkUpdate(); refresh(); if(Date.now()-CACHE_AT>60000) pull(); } });
 if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(()=>{});
 S3.initBg($("bg3d")); { const a=ACC.find(x=>x[0]===store.get("acc","")); if(a) setTimeout(()=>S3.ringColor(a[2]),50); }
-build(); setTab(TAB_NOW); if(DATA) setSync(OUT.length?"warn":"",liveLine()); pull(); setTimeout(()=>refreshNavs(),1500);
+build(); setTab(TAB_NOW); if(DATA) setSync(OUT.length?"warn":"",liveLine()); lockOnStart(); pull(); setTimeout(()=>refreshNavs(),1500);
+/* started fine: tell the boot guard (index.html), and let the worker keep this version as the last good one */
+window.__arthaOK=1; setTimeout(()=>{ try{ const c=navigator.serviceWorker&&navigator.serviceWorker.controller; if(c&&$("legend")&&$("app").offsetHeight) c.postMessage({t:"good",v:APP_VERSION}); }catch(e){} },4000);
+{ const rb=store.get("rolled",null); if(rb!=null){ try{ localStorage.removeItem("artha:rolled"); }catch(e){} setTimeout(()=>showToast("The newest version didn't start, so Artha opened the last one that worked. Your data is fine.",7000),1200); } }
 })();

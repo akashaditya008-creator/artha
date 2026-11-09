@@ -588,3 +588,16 @@ html.homefit .lg{padding:8px 8px 7px}
   background:rgba(4,8,14,.6);border:1px solid var(--line);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
 .rreset svg{width:17px;height:17px;fill:none;stroke:var(--ink);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .rreset[hidden]{display:none}
+
+/* 3.9: Google sign-in gate, fingerprint lock, privacy veil */
+.gate .gbtn{display:flex;justify-content:center;min-height:44px}
+.gate .gbtn:empty{display:none}
+.lock{position:fixed;inset:0;z-index:60;background:var(--bg);display:grid;place-items:center;padding:24px}
+.lock .lbox{display:grid;gap:12px;width:min(340px,100%);text-align:center}
+.lock .logo{width:76px;height:76px;border-radius:22px;justify-self:center;box-shadow:0 0 40px -6px var(--neon)}
+.lock h2{margin:0;font:700 24px var(--display)}.lock p{margin:0;color:var(--muted)}
+.lock button{font:600 16px var(--body);padding:14px;border-radius:16px;background:var(--neon);color:#03100e;border:0}
+.lock button.alt{background:none;color:var(--muted);border:1px solid var(--line);font-size:14px;padding:11px}
+.lock .err{color:#FF8A9A;font-size:13px;min-height:18px}
+html.veil .app{filter:blur(18px)}
+html.locked .app{visibility:hidden}
