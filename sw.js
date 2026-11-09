@@ -1,5 +1,5 @@
 // Artha app shell: network first (so a new version shows the moment it is published), the cached copy only when offline.
-const C="artha-v13",F=["./","index.html","app.css","app.js","scene.js","three.min.js","manifest.webmanifest","icon-192.png","icon-512.png"];
+const C="artha-v14",F=["./","index.html","app.css","app.js","scene.js","three.min.js","manifest.webmanifest","icon-192.png","icon-512.png"];
 self.addEventListener("install",e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(F.map(u=>new Request(u,{cache:"reload"})))).then(()=>self.skipWaiting()));});
 self.addEventListener("activate",e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k.startsWith("artha-")&&k!==C).map(k=>caches.delete(k)))).then(()=>self.clients.claim()));});
 self.addEventListener("fetch",e=>{ const u=new URL(e.request.url); if(e.request.method!=="GET"||u.origin!==location.origin||u.pathname.endsWith("version.json")) return;

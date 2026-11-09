@@ -11,7 +11,7 @@
 <link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icon-192.png"><link rel="apple-touch-icon" href="icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Sora:wght@400;600;700&display=swap">
-<link rel="stylesheet" href="app.css?v=3.5">
+<link rel="stylesheet" href="app.css?v=3.6">
 </head>
 <body>
 <canvas id="bg3d" aria-hidden="true"></canvas>
@@ -38,7 +38,6 @@
       <div class="stage" id="stage"></div>
       <div class="scope" id="scope" aria-hidden="true"></div>
       <div class="legend" id="legend"></div>
-      <div id="homeOpen"></div>
     </section>
     <section id="ledger" hidden></section>
   </main>
@@ -51,7 +50,6 @@
   <button class="fab" id="addBtn" aria-label="Add"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
   <button class="tb" id="tabIns" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M12 3 20 6v6c0 4.5-3.4 8.2-8 9-4.6-.8-8-4.5-8-9V6l8-3z"/></svg>Insurance</button>
 </nav>
-<button class="upbtn" id="upBtn" hidden aria-label="Back to the top"><svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
 
 <div class="upd" id="upd" role="dialog" aria-labelledby="updTitle" hidden>
   <div class="upd-h"><span class="upd-i"><svg viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg></span>
@@ -129,7 +127,7 @@
 <div class="toast" id="toast" role="status" hidden></div>
 <input type="file" id="fileIn" hidden multiple>
 <script src="three.min.js" defer></script>
-<script src="scene.js?v=3.5" defer></script>
-<script src="app.js?v=3.5" defer></script>
+<script src="scene.js?v=3.6" defer></script>
+<script src="app.js?v=3.6" defer></script>
 </body>
 </html>

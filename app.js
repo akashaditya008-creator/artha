@@ -1,7 +1,7 @@
-/* Artha 3.5 — investments + insurance. Data lives in the "Artha – My Investments" Google Sheet via the Apps Script API. */
+/* Artha 3.6 — investments + insurance. Data lives in the "Artha – My Investments" Google Sheet via the Apps Script API. */
 (()=>{
 "use strict";
-const APP_VERSION="3.5";
+const APP_VERSION="3.6";
 const PROJECT_URL="https://claude.ai/project/01a1965d-e312-704a-8114-16f0090c8706";
 const $=id=>document.getElementById(id);
 const store={get(k,d){try{const v=localStorage.getItem("artha:"+k);return v==null?d:JSON.parse(v);}catch(e){return d;}},set(k,v){try{localStorage.setItem("artha:"+k,JSON.stringify(v));}catch(e){}}};
@@ -314,8 +314,6 @@ function drawTiles(){ const T=totals(), keys=["all"].concat(T.G.map(g=>g.h)), co
   const P=pct100(keys.slice(1).map(k=>{ const f=figOf(T,k); return FACE===0?f.put:f.cur; }));
   $("legend").innerHTML=keys.map((k,ki)=>{ const f=figOf(T,k), v=FACE===0?f.put:FACE===1?f.cur:f.gain, share=k==="all"?(FACE===2?"":"100%"):FACE===2?(f.bond?"expected":""):base?P[ki-1]+"%":"";
     return `<button class="lg" data-s="${k}" aria-pressed="${SCOPE===k}" style="--c:${colOf(k)}"><small>${SCOPEL[k]}</small><b class="num ${FACE===2?cls(v):""}">${FACE===2?smoney(v,true):money(v,true)}</b><i>${share||"&nbsp;"}</i></button>`; }).join("");
-  $("homeOpen").innerHTML=SCOPE==="all"?`<p class="hint">Swipe sideways to switch · drag at an angle to turn</p>`:`<button class="opensc" id="openSc" style="--c:${colOf(SCOPE)}">Open ${SCOPEF[SCOPE]} ›</button>`;
-  const o=$("openSc"); if(o) o.onclick=()=>openScr(SCOPE);
   document.querySelectorAll("#legend [data-s],#scope [data-s]").forEach(b=>b.onclick=()=>setScope(b.dataset.s)); ringLabels(T); }
 function flatRing(G){ const tot=SUM(G,x=>x.r.cur)||1, R=72, C=2*Math.PI*R; let off=0;
   return `<svg class="flat" viewBox="0 0 220 170" aria-hidden="true"><circle cx="110" cy="85" r="${R}" fill="none" stroke="rgba(255,255,255,.06)" stroke-width="22"/>${G.map(({h,r})=>{ const L=r.cur/tot*C; const s=`<circle cx="110" cy="85" r="${R}" fill="none" stroke="${CLS[h].col}" stroke-width="22" stroke-dasharray="${Math.max(0,L-2)} ${C}" stroke-dashoffset="${-off}" transform="rotate(-90 110 85)" data-c="${h}" style="cursor:pointer;transition:opacity .3s"/>`; off+=L; return s; }).join("")}</svg>`; }
@@ -1408,9 +1406,9 @@ function setTab(t){ TAB_NOW=t; store.set("tab",t); $("viewInv").hidden=t!=="inv"
   S3.theme(t==="ins"?"ins":"home"); if(t==="ins") renderIns(); else renderHome(); scrollTo({top:0}); }
 $("tabInv").onclick=()=>setTab("inv"); $("tabIns").onclick=()=>setTab("ins");
 $("addBtn").onclick=()=>{ if(SC&&isOpen($("scr"))&&SC.h==="pol") return policyUpload(SC.id,"renew"); if(TAB_NOW==="ins"&&!(SC&&isOpen($("scr")))) return addPolicy(); openAdd("in",SC&&isOpen($("scr"))&&SC.h!=="pol"?(SC.h==="NPS"?{type:"nps"}:{a:SC.h}):{}); };
-function upCheck(){ const inScr=isOpen($("scr")), y=inScr?$("scrBody").scrollTop:scrollY; $("upBtn").hidden=y<420; S3.scroll(y); }
+function upCheck(){ const inScr=isOpen($("scr")), y=inScr?$("scrBody").scrollTop:scrollY; S3.scroll(y); }
 addEventListener("scroll",upCheck,{passive:true}); $("scrBody").addEventListener("scroll",upCheck,{passive:true});
-$("upBtn").onclick=()=>{ const sm=document.documentElement.classList.contains("calm")?"auto":"smooth"; if(isOpen($("scr"))) $("scrBody").scrollTo({top:0,behavior:sm}); else scrollTo({top:0,behavior:sm}); };
+
 (()=>{ let y0=null, pulling=false, dist=0; const ptr=$("ptr");
   addEventListener("touchstart",e=>{ if(scrollY<=0&&!isOpen($("scr"))&&!isOpen($("addSheet"))&&!isOpen($("eSheet"))&&!isOpen($("sheet"))&&!isOpen($("drawer"))&&!e.target.closest(".stage")){ y0=e.touches[0].clientY; pulling=true; dist=0; } },{passive:true});
   addEventListener("touchmove",e=>{ if(!pulling) return; dist=Math.max(0,e.touches[0].clientY-y0); if(scrollY>0){ pulling=false; dist=0; } const h=Math.min(64,dist*.45); ptr.style.height=h+"px"; ptr.querySelector(".spin").style.setProperty("--r",(dist*2)+"deg"); $("ptrTxt").textContent=dist>130?"Release to refresh":"Pull to refresh"; },{passive:true});
