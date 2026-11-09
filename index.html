@@ -32,7 +32,7 @@
 <link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icon-192.png"><link rel="apple-touch-icon" href="icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Sora:wght@400;600;700&display=swap">
-<link rel="stylesheet" href="app.css?v=3.9.1">
+<link rel="stylesheet" href="app.css?v=3.9.2">
 </head>
 <body>
 <canvas id="bg3d" aria-hidden="true"></canvas>
@@ -146,14 +146,14 @@
 <div class="gate" id="gate" hidden><form id="gForm" autocomplete="off"><img class="logo" src="icon-192.png" alt=""><h2>Artha</h2><p id="gMsg">Sign in with your Google account (once on this phone).</p>
   <input id="gLink" type="url" placeholder="Paste the setup link" aria-label="Setup link" hidden>
   <div id="gBtn" class="gbtn"></div>
-  <input id="gIn" type="password" autocomplete="off" aria-label="Passcode" placeholder="Family passcode" hidden><button type="submit" id="gGo" hidden>Open</button>
+  <button type="submit" id="gGo" hidden>Open</button>
   <div class="err" id="gErr" role="alert"></div></form></div>
 <div class="lock" id="lock" hidden><div class="lbox"><img class="logo" src="icon-192.png" alt=""><h2>Artha is locked</h2><p>Use your fingerprint or face to open.</p>
   <button type="button" id="lockBtn">Unlock</button><button type="button" class="alt" id="lockAlt">Use Google sign-in instead</button><div class="err" id="lockErr" role="alert"></div></div></div>
 <div class="toast" id="toast" role="status" hidden></div>
 <input type="file" id="fileIn" hidden multiple>
-<script src="three.min.js" defer></script>
-<script src="scene.js?v=3.9.1" defer></script>
-<script src="app.js?v=3.9.1" defer></script>
+<script src="three.min.js" integrity="sha384-CI3ELBVUz9XQO+97x6nwMDPosPR5XvsxW2ua7N1Xeygeh1IxtgqtCkGfQY9WWdHu" defer></script>
+<script src="scene.js?v=3.9.2" defer></script>
+<script src="app.js?v=3.9.2" defer></script>
 </body>
 </html>

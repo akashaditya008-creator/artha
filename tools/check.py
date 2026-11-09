@@ -51,6 +51,18 @@ if "--fix" in sys.argv and m:
     open(os.path.join(ROOT, "index.html"), "w", encoding="utf-8").write(idx); m = re.search(r'script-src \'self\' (.*?) https://accounts', idx)
 ok(m is not None and set(m.group(1).split()) == set(hashes), f"CSP allows exactly the {len(inl)} inline scripts")
 
+# 4b. three.min.js is pinned by its integrity hash (refreshed by --fix)
+sri = "sha384-" + base64.b64encode(hashlib.sha384(open(os.path.join(ROOT, "three.min.js"), "rb").read()).digest()).decode()
+mi = re.search(r'<script src="three.min.js" integrity="([^"]+)"', idx)
+if "--fix" in sys.argv and mi and mi.group(1) != sri:
+    idx = idx.replace(mi.group(1), sri); open(os.path.join(ROOT, "index.html"), "w", encoding="utf-8").write(idx)
+    mi = re.search(r'<script src="three.min.js" integrity="([^"]+)"', idx)
+ok(mi is not None and mi.group(1) == sri, "three.min.js integrity hash matches the file")
+
+# 4c. no personal details in the public code (they come from the backend after sign-in)
+for word in ["ICICI\",", "Ujjivan", "Canara", "claude.ai/project/", "Stable Money · "]:
+    ok(word not in app, f"app.js does not contain {word!r}")
+
 # 5. it really starts: headless browser + fake backend
 def canon(r): return "\u001f".join("" if x in ("", None) else (str(x) if not isinstance(x, float) or not x.is_integer() else str(int(x))) for x in r[:13])
 def h16(s): return hashlib.sha256(s.encode()).hexdigest()[:16]
@@ -66,7 +78,9 @@ def fp(led):
     return {"n": len(al), "s": sum(u["s"] for u in U.values()), "h": h16("\u001e".join(al)),
             "u": {k: {"n": u["n"], "s": u["s"], "h": h16("\u001e".join(u["c"]))} for k, u in U.items()}}
 DATA = {"v": 3, "at": "2026-11-09T08:00:00.000Z", "url": "https://docs.google.com/x", "led": LED, "rec": [], "files": "",
-        "fp": fp(LED), "chk": [], "audit": [], "me": "Aditya"}
+        "fp": fp(LED), "chk": [], "audit": [], "me": "Aditya",
+        "cfg": {"project": "https://claude.ai/project/TEST", "acct0": ["Groww · Aditya", "Wint · Spardha"],
+                "banks": {"Aditya": [["TestBank", "Primary", "#F58220"]], "Spardha": [["OtherBank", "", "#3D7CF0"]]}}}
 
 class Q(http.server.SimpleHTTPRequestHandler):
     def __init__(s, *a, **k): super().__init__(*a, directory=ROOT, **k)
@@ -106,6 +120,17 @@ with sync_playwright() as p:
     bad = json.loads(json.dumps(DATA)); bad["fp"]["u"]["Groww · Aditya|Aditya"]["s"] += 1; bad["fp"]["h"] = "0" * 16
     ctx, pg, errs, csp = page(data=bad); pg.wait_for_timeout(5000)
     ok('"fp"' in pg.evaluate("localStorage.getItem('artha:issues')||'[]'"), "a tampered sheet total is caught and flagged in the bell")
+    ctx.close()
+    # fingerprint lock: figures are cleared from the page while locked and drawn again after unlocking
+    ctx, pg, errs, csp = page(); pg.wait_for_timeout(5000)
+    pg.evaluate("localStorage.setItem('artha:bioId',JSON.stringify('AAAA'))")
+    pg.add_init_script("""navigator.credentials.get=async()=>{const d=new Uint8Array(37);d[32]=5;return {response:{authenticatorData:d.buffer}};};""")
+    pg.reload(); pg.wait_for_timeout(1500)
+    pg.evaluate("document.dispatchEvent(new Event('x'))")
+    pg.evaluate("document.documentElement.classList.contains('locked')||0")
+    pg.wait_for_timeout(2500)
+    ok("₹" in pg.evaluate("(document.getElementById('legend')||{}).innerText||''") and pg.evaluate("document.getElementById('lock').hidden"), "fingerprint lock opens and the figures come back")
+    ok(not errs, "no JavaScript errors with the lock on" + ("" if not errs else ": " + errs[0][:160]))
     ctx.close()
     ctx, pg, errs, csp = page(break_app=True)
     pg.wait_for_timeout(10500)

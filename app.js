@@ -1,11 +1,15 @@
 /* Artha 3.9 — investments + insurance. Data lives in the "Artha – My Investments" Google Sheet via the Apps Script API. */
 (()=>{
 "use strict";
-const APP_VERSION="3.9.1";
-const PROJECT_URL="https://claude.ai/project/01a1965d-e312-704a-8114-16f0090c8706";
+const APP_VERSION="3.9.2";
+/* Personal details (banks, platforms, the Claude project link) come from the backend after sign-in, so this public code holds none. */
+const CFG=()=>(typeof DATA!=="undefined"&&DATA&&DATA.cfg)||{};
+const PROJECT_URL=()=>{ const u=safeUrl(CFG().project); return u==="#"?"https://claude.ai/projects":u; };
 const $=id=>document.getElementById(id);
 const store={get(k,d){try{const v=localStorage.getItem("artha:"+k);return v==null?d:JSON.parse(v);}catch(e){return d;}},set(k,v){try{localStorage.setItem("artha:"+k,JSON.stringify(v));}catch(e){}}};
 const esc=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+/* links from the sheet, Drive or Claude: only https:// is allowed (never javascript: or data:) */
+const safeUrl=u=>{ try{ const x=new URL(String(u||""),location.href); if(x.protocol==="https:") return x.href; }catch(e){} return "#"; };
 const SUM=(a,f)=>a.reduce((s,x)=>s+(f?f(x):x),0);
 const splitPr=v=>{ const i=v.lastIndexOf("|"); return [v.slice(0,i),v.slice(i+1)]; };
 const rid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
@@ -14,7 +18,8 @@ const S3=window.Scene3D||{ok:false,theme(){},scroll(){},initBg(c){c.remove();},r
 /* ---------- endpoint (only from the private setup link) ---------- */
 function takeLink(s){ const m=/[#&?]k=([\w-]{20,})/.exec(s||"")||/\/macros\/s\/([\w-]{20,})\//.exec(s||""); if(!m) return false; store.set("api","https://script.google.com/macros/s/"+m[1]+"/exec"); return true; }
 if(takeLink(location.hash)) history.replaceState(null,"",location.pathname+location.search);
-const API=()=>store.get("api",""), PW=()=>store.get("tok","")||store.get("pass","");
+const API=()=>store.get("api",""), PW=()=>store.get("tok","");
+try{ localStorage.removeItem("artha:pass"); }catch(e){} // the old family passcode is no longer used
 function call(action,extra){
   return fetch(API(),{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(Object.assign({action,pass:PW()},extra||{}))})
     .then(r=>r.json(),()=>{ const x=new Error("Couldn't reach Google just now. Check your internet."); x.net=true; throw x; })
@@ -102,7 +107,7 @@ const avColor=s=>{ let h=0; for(const ch of String(s)) h=(h*31+ch.charCodeAt(0))
 
 /* ---------- model: one Ledger. Every entry = date · whose money · account · asset · type · name · qty · price · amount ---------- */
 const WHOS=["Aditya","Spardha"], WHOC={Aditya:"#5B8CFF",Spardha:"#E86CC8"};
-const ACCT0=["Groww · Aditya","Groww · Spardha","Wint · Aditya","Wint · Spardha","Grip · Aditya","Grip · Spardha","Stable Money · Aditya","Stable Money · Spardha","INDmoney · Aditya","INDmoney · Spardha","NPS · Aditya"];
+const ACCT0=()=>Array.isArray(CFG().acct0)?CFG().acct0.map(String):[];
 const whoVia=(who,a)=>{ if(!/ · /.test(a||"")) return (who?who+" · ":"")+String(a||""); const h=holderOf(a), p=platOf(a); return !who||h===who?`${h} on ${p}`:`${who}'s money on ${h}'s ${p}`; },
 prettyAcct=a=>/ · /.test(a||"")?String(a).replace(" · "," (")+")":String(a||""), holderOf=a=>/spardha/i.test(a)?"Spardha":"Aditya", platOf=a=>String(a||"").split(" · ")[0];
 const keyName=s=>String(s).toLowerCase().replace(/[^a-z0-9 ]/g," ").split(/\s+/).filter(w=>w&&!/^(fund|direct|growth|plan|regular|option|the|idcw|ltd|limited)$/.test(w)).slice(0,4).join(" ");
@@ -226,7 +231,7 @@ function build(){
     if(u.valued){ u.gain=u.cur-u.net; u.flows=u.T.filter(t=>t.date&&t.amt).map(t=>[t.date,-t.amt]).concat([[today,u.cur]]); u.x=xirr(u.flows); }
   }
   const ul=[...units.values()].filter(u=>u.h!=="Term"&&(u.T.length||u.V.length));
-  const accts=[...new Set(ACCT0.concat(rows.map(r=>r.acct)).filter(a=>a&&a!=="Insurance"))];
+  const accts=[...new Set(ACCT0().concat(rows.map(r=>r.acct)).filter(a=>a&&a!=="Insurance"))];
   M={units:ul,tx,hold,bonds,today,rec,accts,url:D.url||"",gid:D.gid||0,files:D.files||"",term:term.length?{name:"Term plan",T:term}:null,v3:D===DATA,rows};
 }
 
@@ -388,7 +393,7 @@ function holdRow(h,k){ const gp=h.inv>0?h.gain/h.inv:null, isMF=h.a==="Mutual Fu
     <div class="r"><b class="num">${money(h.cur,true)}</b><small class="${cls(h.gain)}">${h.inv?smoney(h.gain,true)+(gp!=null?" · "+pct(gp):""):""}</small></div></button>`; }
 function fundsFromOrders(who,h){ const m=new Map(); txFor(h||"Mutual Funds",who).forEach(t=>{ const nm=t.name||"Mutual fund", id=t.who+"|"+nm; const f=m.get(id)||{id,name:nm,who:t.who,T:[],net:0,n:0}; f.T.push(t); f.net+=t.amt; if(t.amt>0) f.n++; m.set(id,f); });
   return [...m.values()].filter(f=>f.net>1&&f.name!=="Mutual fund").sort((a,b)=>b.net-a.net); }
-const fundOrderRow=(f,k)=>`<button class="hl" data-fund="${esc(f.id)}" style="--k:${k||0}"><span class="av" style="background:${avColor(f.name)}">${esc(initials(f.name))}</span><div style="min-width:0"><div class="n">${esc(f.name)}</div><div class="m">${f.n} order${f.n===1?"":"s"}${WHO==="all"?" · "+f.who:""}</div></div><div class="r"><b class="num">${money(f.net,true)}</b><small>invested</small></div></button>`;
+const fundOrderRow=(f,k)=>`<button class="hl" data-fund="${esc(f.id)}" style="--k:${k||0}"><span class="av" style="background:${avColor(f.name)}">${esc(initials(f.name))}</span><div style="min-width:0"><div class="n">${esc(f.name)}</div><div class="m">${f.n} order${f.n===1?"":"s"}${WHO==="all"?" · "+esc(f.who):""}</div></div><div class="r"><b class="num">${money(f.net,true)}</b><small>invested</small></div></button>`;
 function bondRow(b){ const pr=b.exp>0?Math.min(1,b.repaid/b.exp):(b.closed?1:0), due=b.next&&b.next.d<=M.today;
   return `<button class="brow" data-bond="${esc(b.key)}"><div class="a"><span class="n">${esc(b.name)}</span><span class="v num">${money(b.cost,true)}</span></div>
     <div class="m"><span>${esc(whoVia(b.who,b.acct))}</span><span>${b.closed?`<span class="tag ok">Repaid</span>`:due?`<span class="tag due">Due ${fmtDs(b.next.d)}</span>`:b.next?"Next "+fmtDs(b.next.d)+(b.next.a?" · "+money(b.next.a,true):""):"No date"}</span></div>
@@ -521,7 +526,7 @@ function bondsBody(){
 }
 const fmtDy=s=>{ const d=dOf(s); return `${d.getDate()} ${MON[d.getMonth()]} ${String(d.getFullYear()).slice(2)}`; };
 function payRow({b,e},n,showName){ const due=e.d<=M.today;
-  return `<button class="prow" ${due?`data-pr="${esc(b.key)}|${e.d}"`:`data-bond="${esc(b.key)}"`}><span class="no num">${n}</span>
+  return `<button class="prow" ${due?`data-pr="${esc(b.key)}|${esc(e.d)}"`:`data-bond="${esc(b.key)}"`}><span class="no num">${n}</span>
     <div style="min-width:0"><div class="n">${esc(showName?b.name:(e.i&&e.a&&e.a-e.i>1?"Principal + interest":"Interest"))}</div><div class="m">${e.i?"interest "+money(e.i,true)+(e.est?" (est.)":""):""}${e.a&&e.i&&e.a-e.i>1?" · principal "+money(e.a-e.i,true):""}${showName?"":""}${due?" · tap to confirm":""}</div></div>
     <div class="r"><b class="num">${e.a?money(e.a,false):"—"}</b><span class="dchip ${due?"due":""}">${fmtDy(e.d)}</span></div></button>`; }
 function payoutList(){ const Bs=bondsFor(WHO).filter(b=>b.open.length), L=[]; Bs.forEach(b=>b.open.forEach(e=>L.push({b,e}))); L.sort((x,y)=>x.e.d<y.e.d?-1:x.e.d>y.e.d?1:0);
@@ -652,7 +657,7 @@ function fundSheet(id){ const f=fundsFromOrders("all").find(x=>x.id===id); if(!f
   openE(`<div class="eamt num" style="color:var(--ink)">${money(f.net,false)}</div><div class="t">${esc(f.name)}</div>
     ${dl([["Investor",esc(f.who)],["Platform",esc([...new Set(f.T.map(t=>t.p))].join(", "))],["Orders",String(f.n)],["First order",fmtD(first(f.T))]])}
     <div class="list">${f.T.slice().sort((a,b)=>a.date<b.date?1:-1).map(txRow).join("")}</div>${closeBtn}`); }
-function txSheet(t){ if(!t) return; const r=t.src||{}, link=M.url&&t.row?`${M.url}#gid=${M.gid}&range=A${t.row}`:"", neg=txNeg(t);
+function txSheet(t){ if(!t) return; const r=t.src||{}, link=M.url&&t.row?safeUrl(`${M.url}#gid=${encodeURIComponent(M.gid)}&range=A${Number(t.row)||1}`):"", neg=txNeg(t);
   openE(`<div class="eamt num" style="color:${neg?"var(--spend)":"var(--ink)"}">${t.type==="Bonus"?"+"+qtyf(t.qty)+" shares":money(Math.abs(t.show),false)}</div><div class="t">${esc(txTitle(t))}</div>
     ${dl([["Date",fmtD(t.date)],["Whose money",esc(t.who)],["Account",esc(t.acct)],t.name?["Name",esc(t.name)]:null,t.qty?[t.asset==="Mutual Funds"?"Units":"Quantity",qtyf(t.qty)]:null,t.price?["Price",money(t.price,false)]:null,
       ["Type",esc(t.type)],t.via?["Paid via",esc(t.via==="Balance"?"Account balance":t.via)]:null,t.bank?["Bank",esc(t.bank)]:null,t.tds?["TDS deducted (your income, paid as tax)",money(t.tds,false)]:null,t.pr?["Principal part",money(t.pr,false)]:null,t.net?["Reached the bank",money(t.net,false)]:null,t.note2?["Note",esc(t.note2)]:null,t.id&&!t.pending?["Entry",esc(t.id)]:null])}
@@ -666,10 +671,10 @@ function periodSheet(label,p){ openE(`<div class="eamt num" style="color:var(--i
     <div class="list">${p.T.slice().sort((a,b)=>a.date<b.date?1:-1).map(txRow).join("")||`<div class="empty">Nothing in this period.</div>`}</div>${closeBtn}`); }
 function monthPayoutSheet(p){ const [y,m]=p.k.split("-");
   openE(`<div class="eamt num" style="color:var(--ink)">${money(p.got+p.exp+p.due,false)}</div><div class="t">Bond money · ${MON[+m-1]} ${y}</div>
-    <div class="list">${p.L.map(x=>`<button class="hl" ${x.st==="due"?`data-pr="${esc(x.b.key)}|${x.d}"`:`data-bond="${esc(x.b.key)}"`}><span class="av" style="background:${x.st==="got"?"var(--ok)":x.st==="due"?"var(--accent)":CLS.Bonds.col};color:#111">${dOf(x.d).getDate()}</span><div style="min-width:0"><div class="n">${esc(x.b.name)}</div><div class="m">${fmtD(x.d)}</div></div><div class="r"><b class="num">${x.a?money(x.a,true):"—"}</b><small>${x.st==="got"?`<span class="tag ok">Received</span>`:x.st==="due"?`<span class="tag due">Confirm</span>`:"expected"}</small></div></button>`).join("")}</div>${closeBtn}`); }
+    <div class="list">${p.L.map(x=>`<button class="hl" ${x.st==="due"?`data-pr="${esc(x.b.key)}|${esc(x.d)}"`:`data-bond="${esc(x.b.key)}"`}><span class="av" style="background:${x.st==="got"?"var(--ok)":x.st==="due"?"var(--accent)":CLS.Bonds.col};color:#111">${dOf(x.d).getDate()}</span><div style="min-width:0"><div class="n">${esc(x.b.name)}</div><div class="m">${fmtD(x.d)}</div></div><div class="r"><b class="num">${x.a?money(x.a,true):"—"}</b><small>${x.st==="got"?`<span class="tag ok">Received</span>`:x.st==="due"?`<span class="tag due">Confirm</span>`:"expected"}</small></div></button>`).join("")}</div>${closeBtn}`); }
 function bondSheet(key){ const b=M.bonds.find(x=>x.key===key); if(!b) return; const today=M.today, gain=b.closed?b.repaid-b.cost:b.egain, info=b.info||{};
   const sch=b.sched.map(e=>{ const snz=(SNZ[b.key+"|"+e.d]||"")>today, due=!e.done&&e.d<=today&&!snz, amt=e.done&&e.row?-e.row.amt:e.a;
-    return `<button class="hl" ${!e.done?`data-pr="${esc(b.key)}|${e.d}"`:""}><span class="av" style="background:${e.done?"var(--ok)":due?"var(--accent)":CLS.Bonds.col};color:#111">${dOf(e.d).getDate()}</span><div style="min-width:0"><div class="n">${fmtD(e.d)}</div><div class="m">${e.done?"Received"+(e.row&&e.row.tds?" · TDS "+rs(e.row.tds,false):""):snz?"Snoozed to "+fmtDs(SNZ[b.key+"|"+e.d]):due?"Tap to confirm":"Principal "+rs(e.p||0,true)+" · interest "+rs(e.i||0,true)+(e.est?" (est.)":"")}</div></div><div class="r"><b class="num">${amt?money(amt,true):"—"}</b><small>${e.done?`<span class="tag ok">Done</span>`:due?`<span class="tag due">Due</span>`:""}</small></div></button>`; }).join("");
+    return `<button class="hl" ${!e.done?`data-pr="${esc(b.key)}|${esc(e.d)}"`:""}><span class="av" style="background:${e.done?"var(--ok)":due?"var(--accent)":CLS.Bonds.col};color:#111">${dOf(e.d).getDate()}</span><div style="min-width:0"><div class="n">${fmtD(e.d)}</div><div class="m">${e.done?"Received"+(e.row&&e.row.tds?" · TDS "+rs(e.row.tds,false):""):snz?"Snoozed to "+fmtDs(SNZ[b.key+"|"+e.d]):due?"Tap to confirm":"Principal "+rs(e.p||0,true)+" · interest "+rs(e.i||0,true)+(e.est?" (est.)":"")}</div></div><div class="r"><b class="num">${amt?money(amt,true):"—"}</b><small>${e.done?`<span class="tag ok">Done</span>`:due?`<span class="tag due">Due</span>`:""}</small></div></button>`; }).join("");
   openE(`<div class="eamt num" style="color:var(--ink)">${money(b.cost,false)}</div><div class="t">${esc(b.name)}</div>
     ${dl([["Status",b.closed?"Repaid":b.next?(b.next.d<=today?"Repayment due":"Active"):"Active"],["Investor",esc(b.who)],["Platform",esc(b.platL)],["Bought",fmtD(b.date)],info.ytm||info.rate?["Yield",esc(info.ytm?info.ytm+"% a year":info.rate)]:null,b.exp?["Expected back (before TDS)",money(b.exp,false)]:null,["Received so far",money(b.repaid,false)],
       b.tds?["TDS deducted so far",money(b.tds,false)]:null,gain==null?null:[b.closed?"Gain":"Expected gain",`<span class="${cls(gain)}">${smoney(gain)}</span>`],b.mat?["Ends",fmtD(b.mat)]:null,b.note?["Note",esc(b.note)]:null,info.src?["Schedule from",esc(info.src)]:null])}
@@ -693,7 +698,7 @@ function bellItems(){ const due=dueItems("all"), soon=soonItems("all",30), ib=re
 function paintBell(){ if(!M) return; const B=bellItems(); $("bellN").hidden=!B.n; $("bellN").textContent=B.n>9?"9+":B.n; $("bellBtn").classList.toggle("ring",B.n>0);
   $("dInboxS").innerHTML=recs("inbox").some(r=>r.d.status==="new")?`<span class="tag due">${recs("inbox").filter(r=>r.d.status==="new").length} waiting</span>`:"›"; }
 function openBell(){ const B=bellItems(), wait=B.ib.filter(r=>r.d.status==="new"), ready=B.ib.filter(r=>r.d.status==="ready");
-  const row=(x,tag)=>`<button class="hl" data-pr="${esc(x.b.key)}|${x.e.d}"><span class="av" style="background:${tag==="due"?"var(--accent)":CLS.Bonds.col};color:#111">${dOf(x.e.d).getDate()}</span><div style="min-width:0"><div class="n">${esc(x.b.name)}</div><div class="m">${tag==="due"?"Due "+fmtD(x.e.d)+" · did it arrive?":"Due "+fmtD(x.e.d)}</div></div><div class="r"><b class="num">${x.e.a?money(x.e.a,true):"—"}</b><small>${tag==="due"?`<span class="tag due">Confirm</span>`:"expected"}</small></div></button>`;
+  const row=(x,tag)=>`<button class="hl" data-pr="${esc(x.b.key)}|${esc(x.e.d)}"><span class="av" style="background:${tag==="due"?"var(--accent)":CLS.Bonds.col};color:#111">${dOf(x.e.d).getDate()}</span><div style="min-width:0"><div class="n">${esc(x.b.name)}</div><div class="m">${tag==="due"?"Due "+fmtD(x.e.d)+" · did it arrive?":"Due "+fmtD(x.e.d)}</div></div><div class="r"><b class="num">${x.e.a?money(x.e.a,true):"—"}</b><small>${tag==="due"?`<span class="tag due">Confirm</span>`:"expected"}</small></div></button>`;
   let h=`<div class="t big">Needs attention</div>`;
   if(B.dc.length) h+=`<div class="gh"><span>Data checks · phone vs sheet</span><b class="num">${B.dc.length}</b></div><div class="list">${B.dc.map(x=>`<button class="hl" data-dc="${esc(x.id)}"><span class="av" style="background:${x.sev==="bad"?"#FF5D73":"var(--accent)"};color:#111">${svgI("check","#111",18)}</span><div style="min-width:0"><div class="n">${esc(x.title)}</div><div class="m">${esc(x.sub)}</div></div><div class="r"><small><span class="tag ${x.sev==="bad"?"bad":"due"}">${x.sev==="bad"?"Fix":"Check"}</span></small></div></button>`).join("")}</div>`;
   if(ready.length) h+=`<div class="gh"><span>Claude has read · review</span><b class="num">${ready.length}</b></div><div class="list">${ready.map(inboxRow).join("")}</div>`;
@@ -794,13 +799,13 @@ async function sendInbox(kind,ctx,files,title,already){
   }catch(x){ openE(`<div class="t big">Couldn't upload</div><div class="s">${esc(x.message||x)}</div>${closeBtn}`); return null; } }
 function processNow(){ const n=recs("inbox").filter(r=>r.d.status==="new").length, msg=`Process my Artha inbox (${n||1} item${n>1?"s":""} waiting).`;
   try{ navigator.clipboard&&navigator.clipboard.writeText(msg); }catch(e){}
-  showToast("Copied: “"+msg+"” — paste it in the new chat",5000); setTimeout(()=>window.open(PROJECT_URL,"_blank","noopener"),350); }
+  showToast("Copied: “"+msg+"” — paste it in the new chat",5000); setTimeout(()=>window.open(PROJECT_URL(),"_blank","noopener"),350); }
 function inboxRow(r){ const d=r.d, ready=d.status==="ready";
   return `<button class="hl" data-ib="${esc(r.id)}"><span class="av" style="background:linear-gradient(135deg,var(--neon2),var(--neon))">${svgI(d.kind==="bond"?"bond":d.kind==="charges"?"stocks":d.kind==="tds"?"check":"file","#04110f",20)}</span><div style="min-width:0"><div class="n">${esc(d.title||"Document")}</div><div class="m">${(d.files||[]).length} file${(d.files||[]).length===1?"":"s"} · ${esc(String(d.at||"").slice(0,10))}</div></div><div class="r"><small><span class="tag ${ready?"neo":"due"}">${ready?"Review":"Waiting"}</span></small></div></button>`; }
 function openInboxItem(id){ const r=M.rec.get(id); if(!r) return; const d=r.d;
   if(d.status==="ready"){ if(d.kind==="bond") return reviewBond(r); if(d.kind==="entry") return reviewEntry(r); if(d.kind==="charges") return reviewCharges(r); if(d.kind==="tds") return reviewTds(r); return reviewPolicy(r); }
   openE(`<div class="t big">${esc(d.title)}</div><div class="s" style="text-align:left">Waiting for Claude to read ${(d.files||[]).length} file${(d.files||[]).length===1?"":"s"}.</div>
-    <div class="list" style="padding:0 14px">${(d.files||[]).map(f=>`<a class="doc" href="${esc(f.url)}" target="_blank" rel="noopener">${svgI("file","var(--neon)")}<span>${esc(f.name)}</span></a>`).join("")}</div>
+    <div class="list" style="padding:0 14px">${(d.files||[]).map(f=>`<a class="doc" href="${esc(safeUrl(f.url))}" target="_blank" rel="noopener noreferrer">${svgI("file","var(--neon)")}<span>${esc(f.name)}</span></a>`).join("")}</div>
     <button class="go" type="button" id="iNow">Process now</button><div class="btns"><button class="x" type="button" id="iDel">Remove from inbox</button>${closeBtn}</div>`);
   $("iNow").onclick=processNow; $("iDel").onclick=()=>{ inboxDone(id,"removed"); ov.back(); refresh(); }; }
 function inboxDone(id,st){ const r=M.rec.get(id); if(!r) return; OUT.push({kind:"rec",ops:[{id,kind:"inbox",title:r.d.title,data:Object.assign({},r.d,{status:st||"done",doneAt:M.today})}],rid:rid()}); saveOut(); flush(); }
@@ -1025,7 +1030,7 @@ function renderPolicy(){ const p=policies().find(x=>x.id===SC.id); const B=$("sc
   B.innerHTML=x; dk.innerHTML=p.d.link==="term"?`<div class="in"><button class="btn2" data-act="pol-doc">Add document</button><button class="btn1" data-act="term-prem">Add premium</button></div>`:`<div class="in"><button class="btn2" data-act="pol-doc">Add document</button><button class="btn1" data-act="pol-renew">${cur?"Add next year's policy":"Add this year's policy"}</button></div>`;
   bindScr(B); const pp=$("pProc"); if(pp) pp.onclick=processNow; }
 const yearOf=t=>t.d.start?`${t.d.start.slice(0,4)}–${(t.d.end||"").slice(2,4)||"?"}`:t.d.created?"Added "+fmtDs(t.d.created):"Undated";
-const docRow=f=>`<a class="doc" href="${esc(f.url)}" target="_blank" rel="noopener">${svgI("file","var(--neon)")}<span>${esc(f.label||f.name)}</span><small>${f.size?Math.max(1,Math.round(f.size/1024))+" KB":""}</small></a>`;
+const docRow=f=>`<a class="doc" href="${esc(safeUrl(f.url))}" target="_blank" rel="noopener noreferrer">${svgI("file","var(--neon)")}<span>${esc(f.label||f.name)}</span><small>${f.size?Math.max(1,Math.round(f.size/1024))+" KB":""}</small></a>`;
 /* one simple form for adding, renewing and editing a policy */
 function addPolicy(){ policyForm(null,null,{}); }
 function editPolicy(pid,tid){ policyForm(pid,tid||"",{}); }
@@ -1134,10 +1139,10 @@ const TYPES=[["stocks","Stocks","stocks","Stocks"],["mf","Mutual fund","mf","Mut
   ["us","US stocks","us","US Stocks"],["cash","Money in / out","cash","Cash"],["nps","NPS","nps","NPS"],["term","Term premium","term","Insurance"],["other","Other","other","Other"]];
 const TCOL={stocks:CLS.Stocks.col,us:CLS.Stocks.col,cash:CLS.Stocks.col,mf:CLS["Mutual Funds"].col,bond:CLS.Bonds.col,fd:CLS.Bonds.col,nps:CLS.NPS.col,term:CLS.Term.col,other:CLS.Other.col};
 /* bank accounts: money always leaves from / lands in the account holder's own bank */
-const BANKS={Aditya:[["ICICI","Primary","#F58220"],["SBI","","#2D9CDB"],["PNB","","#C0392B"]],Spardha:[["HDFC","Usual","#3D7CF0"],["Ujjivan","","#7BDB5A"],["Canara","","#F2C94C"]]};
-const bankList=acct=>BANKS[holderOf(acct)]||BANKS.Aditya;
+const BANKS_=()=>{ const b=CFG().banks; return b&&typeof b==="object"&&Object.keys(b).length?b:{Aditya:[["Bank","","#7E8A88"]]}; };
+const bankList=acct=>{ const B=BANKS_(); return B[holderOf(acct)]||B[Object.keys(B)[0]]; };
 /* the other person's banks, labelled with whose bank it is (e.g. Aditya's money paid from Spardha's HDFC) */
-const otherBanks=acct=>{ const h=BANKS[holderOf(acct)]?holderOf(acct):"Aditya"; return Object.keys(BANKS).filter(p=>p!==h).flatMap(p=>BANKS[p].map(([b,,c])=>[b+" · "+p,"",c])); };
+const otherBanks=acct=>{ const BANKS=BANKS_(), h=BANKS[holderOf(acct)]?holderOf(acct):Object.keys(BANKS)[0]; return Object.keys(BANKS).filter(p=>p!==h).flatMap(p=>BANKS[p].map(([b,,c])=>[b+" · "+p,"",c])); };
 const bankPick=acct=>{ const L=bankList(acct).concat(otherBanks(acct)), b=store.get("bank:"+acct,""); return L.some(x=>x[0]===b)?b:L[0][0]; };
 const A={mode:"in",digits:"",date:"",who:"Aditya",pre:{},step:"cats",type:null,det:{}};
 const amtNum=()=>Number(A.digits||0);
@@ -1195,8 +1200,8 @@ function fdSched(P,rate,start,end,pay,comp){ const r=rate/100, S=[]; if(!(P>0&&r
 /* the money source / destination row: bank chips (+ the broker balance for stocks) */
 function bankRow(d,acct,opt){ const O=otherBanks(acct), extra=opt.extra||[], cur=d.via==="Balance"?"__bal":d.bank, more=d.bankMore||O.some(x=>x[0]===cur);
   const L=bankList(acct).concat(more?O:[]), who2=[...new Set(O.map(x=>x[0].split(" · ")[1]))].join(" / ");
-  return `<div class="fld"><span>${opt.label}</span><div class="banks" id="dBank">${extra.map(([v,l])=>`<button type="button" data-v="${v}" aria-pressed="${cur===v}"><i style="--bc:var(--neon)"></i>${esc(l)}</button>`).join("")}
-    ${L.map(([b,tag,c])=>`<button type="button" data-v="${esc(b)}" aria-pressed="${cur===b}"><i style="--bc:${esc(c)}"></i>${esc(b)}${tag?` <small>${esc(tag)}</small>`:""}</button>`).join("")}${(more||!O.length?"":`<button type="button" data-v="__more" aria-pressed="false" class="bmore">+ ${esc(who2)}'s bank</button>`)}</div>${opt.hint?`<small class="hint" style="display:block;margin-top:6px">${opt.hint}</small>`:""}</div>`; }
+  return `<div class="fld"><span>${esc(opt.label)}</span><div class="banks" id="dBank">${extra.map(([v,l])=>`<button type="button" data-v="${v}" aria-pressed="${cur===v}"><i style="--bc:var(--neon)"></i>${esc(l)}</button>`).join("")}
+    ${L.map(([b,tag,c])=>`<button type="button" data-v="${esc(b)}" aria-pressed="${cur===b}"><i style="--bc:${esc(c)}"></i>${esc(b)}${tag?` <small>${esc(tag)}</small>`:""}</button>`).join("")}${(more||!O.length?"":`<button type="button" data-v="__more" aria-pressed="false" class="bmore">+ ${esc(who2)}'s bank</button>`)}</div>${opt.hint?`<small class="hint" style="display:block;margin-top:6px">${esc(opt.hint)}</small>`:""}</div>`; }
 /* cash sitting in a broker balance for one account + whose money */
 function cashOf(acct,who){ const u=(M.units||[]).find(x=>x.acct===acct&&x.who===who&&x.h==="Stocks"); return u?r2(u.cash):0; }
 const MFSTAMP=0.00005; // stamp duty on mutual fund purchases (0.005%)
@@ -1379,10 +1384,9 @@ const fmtWhen=t=>{ if(!t) return "never"; const m=Math.round((Date.now()-t)/6e4)
 const liveLine=()=>`Synced ${fmtWhen(CACHE_AT)}`+(OUT.length?` · ${OUT.length} waiting`:"")+(FAILED.length?` · ${FAILED.length} not saved`:"")+(CHECKS().length?" · check the bell":"");
 function applyData(d){ if(!d) return; if(d.v!==3){ DATA=d; refresh(); setSync("warn","Paste the new Artha backend (v3) and run setupV3() to see your data"); return; }
   const prev=DATA; DATA=d; CACHE_AT=Date.now(); store.set("cache",d); store.set("cacheAt",CACHE_AT); refresh(); setSync(OUT.length||FAILED.length?"warn":"live",liveLine()); refreshNavs();
-  reconcile(d,prev).catch(()=>{}); if(d.me==="Passcode"&&!store.get("tok","")) setTimeout(()=>askPass("Artha now uses Google sign-in. Sign in once on this phone; the passcode will stop working soon."),600); }
+  reconcile(d,prev).catch(()=>{}); }
 function errText(e){ const m=String(e&&e.message||e||"");
   if(/SIGNIN/.test(m)){ store.set("tok",""); askPass(m.replace(/^SIGNIN:\s*/,"")); return "Please sign in."; }
-  if(/PASSCODE/.test(m)){ store.set("pass",""); askPass("Wrong passcode. 3 wrong tries lock Artha for 3 hours."); return "Passcode needed."; }
   if(/Locked/.test(m)){ if(!$("gate").hidden) $("gErr").textContent=m; return m; } return m||"Couldn't reach Google just now."; }
 const ACTION={add:"add",edit:"edit",del:"del",rec:"rec",cal:"cal"};
 function flush(){ if(flushing||!PW()||!API()||!OUT.length) return;
@@ -1392,7 +1396,7 @@ function flush(){ if(flushing||!PW()||!API()||!OUT.length) return;
   const e=it.kind==="add"?{rows:it.rows,rid:it.rid}:it.kind==="del"?{id:it.id,rid:it.rid}:it.kind==="edit"?{id:it.id,row:it.row,rid:it.rid}:{ops:it.ops,rid:it.rid};
   if(!it.at){ it.at=Date.now(); saveOut(); }
   call(ACTION[it.kind],{e}).then(d=>{ flushing=false; OUT.splice(OUT.indexOf(it),1); saveOut(); verifyWrite(it,d); applyData(d); flush(); },x=>{ flushing=false; const m=String(x&&x.message||x);
-    if(x&&x.net){ setSync("warn",`Offline · ${OUT.length} waiting to sync`); return; } if(/SIGNIN|PASSCODE|Locked/.test(m)){ setSync("warn",errText(x)); return; }
+    if(x&&x.net){ setSync("warn",`Offline · ${OUT.length} waiting to sync`); return; } if(/SIGNIN|Locked/.test(m)){ setSync("warn",errText(x)); return; }
     if(/Unknown action/i.test(m)){ setSync("warn","Waiting for the Artha backend update · "+OUT.length+" saved on this phone"); return; }
     /* the sheet refused it: keep it on this phone (bell › Data checks) instead of losing it */
     OUT.splice(OUT.indexOf(it),1); saveOut(); FAILED.push(Object.assign({},it,{err:m,failedAt:Date.now()})); saveFailed(); refresh(); showToast(`Not saved: ${m} · kept in the bell to retry`,7000); flush(); }); }
@@ -1408,20 +1412,19 @@ let gsi=null;
 function loadGSI(){ return gsi||(gsi=new Promise((ok,bad)=>{ const s=document.createElement("script"); s.src="https://accounts.google.com/gsi/client"; s.async=true; s.onload=ok; s.onerror=()=>{ gsi=null; bad(); }; document.head.appendChild(s); })); }
 function askPass(msg,needLink){ const need=needLink||!API(); $("gLink").hidden=!need;
   $("gMsg").textContent=need?"Open the private setup link once (or paste it here), then sign in with Google.":"Sign in with your Google account (once on this phone).";
-  $("gErr").textContent=msg||""; $("gate").hidden=false; $("gIn").hidden=true; $("gGo").hidden=!need;
+  $("gErr").textContent=msg||""; $("gate").hidden=false; $("gGo").hidden=!need;
   if(need){ setTimeout(()=>$("gLink").focus(),50); $("gBtn").innerHTML=""; return; }
   loadGSI().then(()=>{ google.accounts.id.initialize({client_id:CLIENT_ID,callback:onCred,ux_mode:"popup",auto_select:true,itp_support:true});
     const b=$("gBtn"); b.innerHTML=""; google.accounts.id.renderButton(b,{theme:"filled_blue",size:"large",shape:"pill",text:"signin_with",width:260}); })
   .catch(()=>{ $("gErr").textContent="Couldn't load Google sign-in. Check your internet and reopen Artha."; }); }
 function onCred(resp){ $("gErr").textContent="Signing in…";
-  call("login",{e:{idToken:resp.credential}}).then(d=>{ store.set("tok",d.tok); store.set("me",d.name); store.set("email",d.email); store.set("pass","");
+  call("login",{e:{idToken:resp.credential}}).then(d=>{ store.set("tok",d.tok); store.set("me",d.name); store.set("email",d.email);
       $("gErr").textContent=""; $("gate").hidden=true; LOCK.unlock(); showToast(`Signed in as ${d.name}`); pull(); if(LOCK.can()&&!store.get("bioId","")&&!store.get("bioAsked",false)) setTimeout(offerLock,900); },
     e=>{ const m=String(e&&e.message||e);
-      if(/Unknown action/i.test(m)){ $("gErr").textContent="Google sign-in isn't switched on in the backend yet. Use the family passcode for now."; $("gIn").hidden=false; $("gGo").hidden=false; $("gIn").focus(); return; }
+      if(/Unknown action/i.test(m)){ $("gErr").textContent="Google sign-in isn't switched on in the backend yet."; return; }
       $("gErr").textContent=m.replace(/^SIGNIN:\s*/,""); }); }
 $("gForm").addEventListener("submit",e=>{ e.preventDefault();
-  if(!$("gLink").hidden){ if(!takeLink($("gLink").value)){ $("gErr").textContent="That doesn't look like the Artha setup link."; return; } $("gLink").value=""; if($("gIn").hidden){ askPass(); return; } }
-  const v=$("gIn").value.trim(); if(!v){ $("gErr").textContent="Enter the passcode."; return; } store.set("pass",v); $("gate").hidden=true; $("gIn").value=""; pull(); });
+  if(!$("gLink").hidden){ if(!takeLink($("gLink").value)){ $("gErr").textContent="That doesn't look like the Artha setup link."; return; } $("gLink").value=""; askPass(); } });
 
 /* ---------- app lock: the phone's own fingerprint / face check (WebAuthn, nothing leaves the phone) ---------- */
 const b64u=b=>btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
@@ -1429,15 +1432,18 @@ const ub64=s=>Uint8Array.from(atob(s.replace(/-/g,"+").replace(/_/g,"/")),c=>c.c
 const LOCK={ locked:false, hiddenAt:0, AFTER:60000,
   can:()=>!!(window.PublicKeyCredential&&navigator.credentials&&window.isSecureContext),
   on:()=>!!store.get("bioId",""),
-  show(){ if(!LOCK.on()) return; LOCK.locked=true; document.documentElement.classList.add("locked"); $("lock").hidden=false; $("lockErr").textContent=""; },
-  unlock(){ LOCK.locked=false; document.documentElement.classList.remove("locked","veil"); $("lock").hidden=true; } };
+  show(){ if(!LOCK.on()) return; LOCK.locked=true; document.documentElement.classList.add("locked"); $("lock").hidden=false; $("lockErr").textContent="";
+    /* clear the figures from the page itself (not just cover them); they are drawn again after the fingerprint check */
+    ["legend","ledger","viewIns","scrBody","res"].forEach(id=>{ const n=$(id); if(n) n.innerHTML=""; });
+    ["f0","f1","f2"].forEach(id=>{ const n=$(id); if(n) n.querySelectorAll(".num,b,strong").forEach(x=>{ x.textContent="••••"; }); }); },
+  unlock(){ const was=LOCK.locked; LOCK.locked=false; document.documentElement.classList.remove("locked","veil"); $("lock").hidden=true; if(was&&DATA) refresh(); } };
 async function bioCreate(){ const cred=await navigator.credentials.create({publicKey:{challenge:crypto.getRandomValues(new Uint8Array(32)),rp:{name:"Artha"},
   user:{id:crypto.getRandomValues(new Uint8Array(16)),name:store.get("email","")||"artha",displayName:"Artha · "+(store.get("me","")||"me")},
   pubKeyCredParams:[{type:"public-key",alg:-7},{type:"public-key",alg:-257}],
   authenticatorSelection:{authenticatorAttachment:"platform",userVerification:"required",residentKey:"discouraged"},timeout:60000,attestation:"none"}});
   if(!cred) throw new Error("Not set up"); store.set("bioId",b64u(cred.rawId)); }
 async function bioCheck(){ const a=await navigator.credentials.get({publicKey:{challenge:crypto.getRandomValues(new Uint8Array(32)),allowCredentials:[{type:"public-key",id:ub64(store.get("bioId",""))}],userVerification:"required",timeout:60000}});
-  if(!a||!(new Uint8Array(a.response.authenticatorData)[32]&4)) throw new Error("Fingerprint or face wasn't confirmed."); }
+  const fl=a?new Uint8Array(a.response.authenticatorData)[32]:0; if((fl&0x05)!==0x05) throw new Error("Fingerprint or face wasn't confirmed."); } // user present + user verified
 async function unlockNow(){ $("lockErr").textContent=""; try{ await bioCheck(); LOCK.unlock(); if(Date.now()-CACHE_AT>60000) pull(); }catch(e){ $("lockErr").textContent=e&&e.name==="NotAllowedError"?"Cancelled. Tap Unlock to try again.":String(e&&e.message||e); } }
 $("lockBtn").onclick=unlockNow;
 $("lockAlt").onclick=()=>{ store.set("tok",""); $("lock").hidden=true; askPass("Sign in with Google to open Artha."); };
@@ -1469,7 +1475,7 @@ function openCheck(cid){ const x=CHECKS().find(c=>c.id===cid); if(!x) return; co
   let btns=`<button class="x" type="button" data-close>Close</button>`;
   if(k==="f:") btns=`<button class="go" type="button" id="ckRetry">Try saving again</button><button class="x danger" type="button" id="ckDrop">Discard this change</button>`+btns;
   if(k==="i:") btns=`<button class="go" type="button" id="ckOk">I've checked it · dismiss</button>`+btns;
-  if(k==="c:"&&M&&M.url) btns=`<a class="go" href="${esc(M.url)}" target="_blank" rel="noopener">Open the sheet</a>`+btns;
+  if(k==="c:"&&M&&M.url) btns=`<a class="go" href="${esc(safeUrl(M.url))}" target="_blank" rel="noopener noreferrer">Open the sheet</a>`+btns;
   const it=k==="i:"?ISSUES.find(i=>"i:"+i.id===cid):null;
   openE(`<div class="t big">${esc(x.title)}</div><div class="s" style="text-align:left;white-space:pre-wrap">${esc(it&&it.detail||x.sub)}</div>${btns}`);
   const r=$("ckRetry"); if(r) r.onclick=()=>{ const f=FAILED.find(f=>"f:"+f.rid===cid); FAILED=FAILED.filter(z=>z!==f); saveFailed(); if(f){ delete f.err; delete f.failedAt; f.rid=rid(); OUT.push(f); saveOut(); } ov.back(); refresh(); flush(); };
@@ -1541,7 +1547,7 @@ function buildDrawer(){
   $("fLockHint").textContent=LOCK.can()?(LOCK.on()?"Asks when you open Artha and after a minute away.":"Turn on to ask for your fingerprint or face when Artha opens."):"Not available in this browser.";
   const cur=store.get("acc",""); $("fAcc").innerHTML=ACC.map(([k,n,c])=>`<button type="button" aria-pressed="${cur===k}" data-k="${k}"><span class="sw" style="--a:${c}"></span>${n}</button>`).join("");
   $("fAcc").querySelectorAll("button").forEach(b=>b.onclick=()=>{ store.set("acc",b.dataset.k); if(b.dataset.k) document.documentElement.setAttribute("data-acc",b.dataset.k); else document.documentElement.removeAttribute("data-acc"); S3.ringColor(ACC.find(a=>a[0]===b.dataset.k)[2]); buildDrawer(); });
-  $("sheetLink").href=M&&M.url||"#"; $("filesLink").href=M&&M.files||"#"; $("filesLink").hidden=!(M&&M.files);
+  $("sheetLink").href=safeUrl(M&&M.url); $("filesLink").href=safeUrl(M&&M.files); $("filesLink").hidden=!(M&&M.files);
 }
 const openDrawer=()=>{ buildDrawer(); $("scrim").hidden=false; ov.open($("drawer"),()=>{ vanish($("drawer")); vanish($("scrim")); }); };
 const fromDrawer=fn=>()=>{ ov.back(); setTimeout(fn,240); };
@@ -1560,7 +1566,7 @@ $("forgetBtn").onclick=fromDrawer(()=>{ if(OUT.length){ showToast("Some changes 
     if(store.get("tok","")) call("logout").then(done,done); else done(); }); });
 function eye(){ $("eyeP").setAttribute("d",HIDE?"M3 3l18 18M10.6 6.1A9.8 9.8 0 0 1 12 6c6.4 0 10 6 10 6a17 17 0 0 1-3.2 3.9M6.6 6.6C3.9 8.3 2 12 2 12s3.6 6 10 6c1.6 0 3-.3 4.3-.9":"M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"); $("eyeBtn").setAttribute("aria-label",HIDE?"Show amounts":"Hide amounts"); }
 $("eyeBtn").onclick=()=>{ HIDE=!HIDE; store.set("hide",HIDE); eye(); refresh(); }; eye();
-function refresh(){ build(); if(TAB_NOW==="ins") renderIns(); else renderHome(); paintBell(); if(isOpen($("drawer"))) buildDrawer(); if(SC&&isOpen($("scr"))) renderScr(); if(isOpen($("sheet"))) doSearch(); }
+function refresh(){ if(document.documentElement.classList.contains("locked")) return; build(); if(TAB_NOW==="ins") renderIns(); else renderHome(); paintBell(); if(isOpen($("drawer"))) buildDrawer(); if(SC&&isOpen($("scr"))) renderScr(); if(isOpen($("sheet"))) doSearch(); }
 $("verTxt").textContent="Version "+APP_VERSION;
 /* update card: never pops over an open screen or entry; waits until you're back on Home */
 let UPD=null, updT=0;
@@ -1572,7 +1578,7 @@ async function checkUpdate(manual){ try{ const j=await (await fetch("version.jso
     if(j.v&&j.v!==APP_VERSION){ UPD=j; if(manual||store.get("updLater")!==j.v) showUpd(); } else if(manual) showToast("You're on the latest version"); }
   catch(e){ if(manual) showToast("Couldn't check, you seem to be offline"); } }
 /* update = drop the old worker and every cached copy, then load fresh from the network (with a cache-busting address) */
-async function doUpdate(){ $("updBtn").textContent="Updating…"; try{ const regs=await navigator.serviceWorker?.getRegistrations?.()||[]; await Promise.all(regs.map(r=>r.scope.includes("/artha")?r.unregister():null)); const ks=await caches.keys(); await Promise.all(ks.filter(k=>k.startsWith("artha-")&&k!=="artha-good").map(k=>caches.delete(k))); try{ sessionStorage.removeItem("arthaRolled"); }catch(e){} }catch(e){} location.replace(location.pathname+"?u="+Date.now()+location.hash); }
+async function doUpdate(){ $("updBtn").textContent="Updating…"; try{ const regs=await navigator.serviceWorker?.getRegistrations?.()||[]; await Promise.all(regs.map(r=>r.scope===new URL("./",location.href).href?r.unregister():null)); const ks=await caches.keys(); await Promise.all(ks.filter(k=>k.startsWith("artha-")&&k!=="artha-good").map(k=>caches.delete(k))); try{ sessionStorage.removeItem("arthaRolled"); }catch(e){} }catch(e){} location.replace(location.pathname+"?u="+Date.now()+location.hash); }
 $("updBtn").onclick=doUpdate; $("updLater").onclick=()=>{ if(UPD) store.set("updLater",UPD.v); clearTimeout(updT); $("upd").hidden=true; showToast("OK. Menu › Check for updates whenever you're ready"); };
 $("verBtn").onclick=()=>checkUpdate(true); setTimeout(checkUpdate,2500);
 document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="visible"){ checkUpdate(); refresh(); if(Date.now()-CACHE_AT>60000) pull(); } });

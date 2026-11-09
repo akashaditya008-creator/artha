@@ -600,4 +600,4 @@ html.homefit .lg{padding:8px 8px 7px}
 .lock button.alt{background:none;color:var(--muted);border:1px solid var(--line);font-size:14px;padding:11px}
 .lock .err{color:#FF8A9A;font-size:13px;min-height:18px}
 html.veil .app{filter:blur(18px)}
-html.locked .app{visibility:hidden}
+html.locked .app,.locked .scr,.locked .sheet,.locked .add,.locked .esheet,.locked .drawer,.locked .scrim,.locked .upd,.locked .toast,.locked #bg3d{visibility:hidden}
