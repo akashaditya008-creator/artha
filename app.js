@@ -1,7 +1,7 @@
-/* Artha 3.7 — investments + insurance. Data lives in the "Artha – My Investments" Google Sheet via the Apps Script API. */
+/* Artha 3.8 — investments + insurance. Data lives in the "Artha – My Investments" Google Sheet via the Apps Script API. */
 (()=>{
 "use strict";
-const APP_VERSION="3.7";
+const APP_VERSION="3.8";
 const PROJECT_URL="https://claude.ai/project/01a1965d-e312-704a-8114-16f0090c8706";
 const $=id=>document.getElementById(id);
 const store={get(k,d){try{const v=localStorage.getItem("artha:"+k);return v==null?d:JSON.parse(v);}catch(e){return d;}},set(k,v){try{localStorage.setItem("artha:"+k,JSON.stringify(v));}catch(e){}}};

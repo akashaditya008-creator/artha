@@ -581,3 +581,10 @@ html.homefit .lg{padding:8px 8px 7px}
 .lg small{color:var(--c)}
 .lg b{color:var(--ink)}
 .lg[aria-pressed="true"]{background:color-mix(in srgb,var(--c) 30%,var(--surface));border-color:var(--c);box-shadow:0 0 0 1px var(--c),0 8px 22px -8px var(--c)}
+
+/* 3.8: no "Tap to open" on the popped slice; reset button for the ring view */
+.rlab.on::after{content:none;display:none}
+.rreset{position:absolute;right:6px;top:6px;z-index:120;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;
+  background:rgba(4,8,14,.6);border:1px solid var(--line);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
+.rreset svg{width:17px;height:17px;fill:none;stroke:var(--ink);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.rreset[hidden]{display:none}

@@ -1,4 +1,4 @@
-/* Artha 3.3 — 3D layer: a living background on every screen, and the 3D allocation ring on home.
+/* Artha 3.8 — 3D layer: a living background on every screen, and the 3D allocation ring on home.
    Ring physics: a flywheel on a viscous bearing (drag to spin, flick and it keeps turning, friction slows it),
    tilt on a damped spring (push it up or down, it settles back with a small wobble).
    Falls back silently (the app draws a flat ring) when WebGL or three.js isn't available. */
@@ -41,6 +41,15 @@ function art(kind){ const c=document.createElement("canvas"); c.width=c.height=2
     g.bezierCurveTo(176,74,176,136,98,136); g.lineTo(160,190); g.stroke(); }
   else if(kind==="pie"){ ring(128,128,84); g.beginPath(); g.moveTo(128,128); g.lineTo(128,44); g.moveTo(128,128); g.lineTo(200,170); g.moveTo(128,128); g.lineTo(52,166); g.stroke();
     g.globalAlpha=.4; g.beginPath(); g.moveTo(128,128); g.arc(128,128,84,-Math.PI/2,Math.PI*.17); g.closePath(); g.fill(); }
+  else if(kind==="sun"){ ring(128,128,40); g.globalAlpha=.8; for(let i=0;i<12;i++){ const a=i/12*Math.PI*2, r0=56, r1=i%2?78:92; g.beginPath(); g.moveTo(128+Math.cos(a)*r0,128+Math.sin(a)*r0); g.lineTo(128+Math.cos(a)*r1,128+Math.sin(a)*r1); g.stroke(); } }
+  else if(kind==="saturn"){ ring(128,128,40); g.save(); g.translate(128,128); g.rotate(.4); g.beginPath(); g.ellipse(0,0,100,22,0,0,Math.PI*2); g.stroke(); g.globalAlpha=.5; g.beginPath(); g.ellipse(0,0,84,16,0,0,Math.PI*2); g.stroke(); g.restore(); }
+  else if(kind==="orbit"){ g.beginPath(); g.arc(128,128,10,0,Math.PI*2); g.fill(); g.lineWidth=3.5; [0,1,2].forEach(k=>{ g.save(); g.translate(128,128); g.rotate(k*Math.PI/3); g.beginPath(); g.ellipse(0,0,96,32,0,0,Math.PI*2); g.stroke(); g.restore(); });
+    [[214,128],[80,58],[86,204]].forEach(([x,y])=>{ g.beginPath(); g.arc(x,y,7,0,Math.PI*2); g.fill(); }); }
+  else if(kind==="nebula"){ g.lineWidth=0; for(let i=0;i<380;i++){ const a=Math.random()*Math.PI*2, r=Math.pow(Math.random(),.7)*100; g.globalAlpha=.15+Math.random()*.6*(1-r/110); g.beginPath(); g.arc(128+Math.cos(a)*r,128+Math.sin(a)*r*.7,Math.random()*2+.5,0,Math.PI*2); g.fill(); } }
+  else if(kind==="asteroid"){ g.beginPath(); [[70,96],[112,62],[170,74],[198,124],[176,182],[116,196],[66,160]].forEach(([x,y],i)=>i?g.lineTo(x,y):g.moveTo(x,y)); g.closePath(); g.stroke(); g.globalAlpha=.55; ring(118,112,13); ring(160,150,9); ring(104,164,7); }
+  else if(kind==="area"){ const P=[[16,200],[56,170],[92,182],[128,130],[164,144],[200,92],[240,70]]; g.lineWidth=5; g.beginPath(); P.forEach(([x,y],i)=>i?g.lineTo(x,y):g.moveTo(x,y)); g.stroke();
+    g.globalAlpha=.22; g.lineTo(240,236); g.lineTo(16,236); g.closePath(); g.fill(); g.globalAlpha=.4; g.lineWidth=2; [80,140,200].forEach(y=>{ g.beginPath(); g.moveTo(16,y); g.lineTo(240,y); g.stroke(); }); }
+  else if(kind==="coins"){ [0,1,2,3].forEach(k=>{ g.globalAlpha=1-k*.15; g.beginPath(); g.ellipse(128,190-k*30,62,16,0,0,Math.PI*2); g.stroke(); g.beginPath(); g.moveTo(66,190-k*30); g.lineTo(66,204-k*30); g.moveTo(190,190-k*30); g.lineTo(190,204-k*30); g.stroke(); }); }
   const t=new T.CanvasTexture(c); t.needsUpdate=true; return t; }
 
 /* ---------- background ---------- */
@@ -62,11 +71,11 @@ S.initBg=function(canvas){
     const m=new T.Mesh(new G(...a),new T.MeshBasicMaterial({color:col,wireframe:true,transparent:true,opacity:.22}));
     m.position.set([-5,5.5,-4,4.5][i],[2.5,-.5,-1.8,3.6][i],[-8,-10,-14,-18][i]); m.userData.s=.12+Math.random()*.2; scene.add(m); solids.push(m); });
   /* drifting space + market line-art, kept faint so the numbers stay readable */
-  const KINDS=["planet","candles","galaxy","trend","moon","rupee","stars","bars","comet","pie","planet","trend"], arts=[];
+  const KINDS=["planet","candles","galaxy","trend","moon","rupee","stars","bars","comet","pie","sun","area","orbit","nebula","coins","saturn","candles","stars","trend","asteroid","galaxy","bars","comet","area"], arts=[];
   KINDS.forEach((k,i)=>{ const mat=new T.SpriteMaterial({map:art(k),color:col,transparent:true,opacity:0,depthWrite:false,blending:T.AdditiveBlending});
     const s=new T.Sprite(mat), z=-7-((i*7.3)%24), sz=1.6+((i*1.37)%1.8);
-    s.position.set(((i*5.1)%18)-9,((i*3.7)%9)-2.4,z); s.scale.set(sz,sz,1);
-    s.userData={vx:(((i*13)%7)-3)*.035,vy:(((i*11)%5)-2)*.02,vr:(((i*17)%9)-4)*.012,o:.09+((i*7)%5)*.022,ph:i*1.3};
+    s.position.set(((i*5.1+i*i*.37)%20)-10,((i*3.7+i*.9)%9.6)-2.6,z); s.scale.set(sz,sz,1);
+    s.userData={vx:(((i*13)%7)-3)*.035,vy:(((i*11)%5)-2)*.02,vr:(((i*17)%9)-4)*.012,o:.11+((i*7)%5)*.025,ph:i*1.3};
     scene.add(s); arts.push(s); });
   BG={r,scene,cam,grid,grid2,dust,solids,arts,col};
   const size=()=>{ r.setSize(innerWidth,innerHeight,false); cam.aspect=innerWidth/innerHeight; cam.updateProjectionMatrix(); };
@@ -101,9 +110,12 @@ const wrapPi=a=>{ a=(a+Math.PI)%(2*Math.PI); if(a<0) a+=2*Math.PI; return a-Math
 S.ring=function(host,segs,cb){
   if(!webgl) return false;
   if(!RG||RG.host!==host){
-    if(RG){ RG.dead=true; RG.r.dispose(); RG.c.remove(); RG.lab.remove(); }
+    if(RG){ RG.dead=true; RG.r.dispose(); RG.c.remove(); RG.lab.remove(); RG.rst.remove(); }
     const c=document.createElement("canvas"); c.className="ring3d"; host.prepend(c);
     const lab=document.createElement("div"); lab.className="rlabs"; host.appendChild(lab);
+    /* the ring stays where the user leaves it; this button brings back the default angle and the slow drift */
+    const rst=document.createElement("button"); rst.type="button"; rst.className="rreset"; rst.hidden=true; rst.setAttribute("aria-label","Reset ring view");
+    rst.innerHTML='<svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.4-5.7M4 4v4.5h4.5"/></svg>'; host.appendChild(rst);
     const r=new T.WebGLRenderer({canvas:c,antialias:true,alpha:true}); r.setPixelRatio(Math.min(2,devicePixelRatio||1));
     const scene=new T.Scene(), cam=new T.PerspectiveCamera(36,1,.1,50); cam.position.set(0,-.2,8.4);
     scene.add(new T.AmbientLight(0xffffff,.55));
@@ -115,8 +127,8 @@ S.ring=function(host,segs,cb){
     const halo2=new T.Mesh(new T.TorusGeometry(1.08,.008,8,120),new T.MeshBasicMaterial({color:0x3CF0D4,transparent:true,opacity:.35})); root.add(halo2);
     const og=new T.BufferGeometry(), on=60, op=new Float32Array(on*3); for(let i=0;i<on;i++){ const a=i/on*Math.PI*2; op[i*3]=Math.cos(a)*2.9; op[i*3+1]=Math.sin(a)*2.9; op[i*3+2]=(Math.random()-.5)*.25; }
     og.setAttribute("position",new T.BufferAttribute(op,3)); const orbit=new T.Points(og,new T.PointsMaterial({color:0x3CF0D4,size:.06,transparent:true,opacity:.8,blending:T.AdditiveBlending})); root.add(orbit);
-    RG={host,c,lab,r,scene,cam,root,spin,halo,halo2,orbit,meshes:[],labs:new Map(),key:"",dead:false,cb:cb||{},
-      th:0,w:.12,ph:TILT0,pv:0,yaw:0,drag:null,pop:null,zoom:0,t0:0,W:320,H:236};
+    RG={host,c,lab,rst,r,scene,cam,root,spin,halo,halo2,orbit,meshes:[],labs:new Map(),key:"",dead:false,cb:cb||{},
+      th:0,w:.12,ph:TILT0,pv:0,rest:TILT0,user:false,yaw:0,drag:null,pop:null,zoom:0,t0:0,W:320,H:236};
     const size=()=>{ const w=host.clientWidth||320, hh=host.clientHeight, h=hh>120?hh:Math.round(w*.8); RG.W=w; RG.H=h; r.setSize(w,h,false); c.style.width=w+"px"; c.style.height=h+"px"; cam.aspect=w/h; cam.updateProjectionMatrix(); RG.dist=Math.max(8.4,3.15/(Math.tan(18*Math.PI/180)*cam.aspect)); };
     size(); new ResizeObserver(size).observe(host);
     const ray=new T.Raycaster(), v2=new T.Vector2();
@@ -139,13 +151,14 @@ S.ring=function(host,segs,cb){
       /* up / down tilts the ring; past the stops it resists like rubber */
       let np=RG.ph+dy*.0065; if(np<TMIN) np=TMIN-(TMIN-np)*.35; if(np>TMAX) np=TMAX+(np-TMAX)*.35; d.vp=d.vp*.6+((np-RG.ph)/dt)*.4; RG.ph=np; });
     const up=e=>{ const d=RG.drag; RG.drag=null; if(!d) return;
-      if(d.mode==="turn"){ RG.w=Math.max(-24,Math.min(24,d.vw)); RG.pv=d.vp; return; }
+      if(d.mode==="turn"){ RG.w=Math.max(-24,Math.min(24,d.vw)); RG.pv=d.vp; RG.rest=Math.max(TMIN,Math.min(TMAX,RG.ph)); RG.user=true; RG.rst.hidden=false; return; }
       if(d.mode==="swipe"){ const dx=e.clientX-d.x0; RG.cb.onSwipeMove&&RG.cb.onSwipeMove(null); if(Math.abs(dx)>40&&RG.cb.onSwipe) RG.cb.onSwipe(dx<0?1:-1); return; }
       if(d.moved<10&&performance.now()-d.t<600){ const m=pick(e);
         if(!m){ if(RG.pop) setPop(null,true); else if(d.hole&&RG.cb.onSwipe) RG.cb.onSwipe(1); return; }
         const cc=m.userData.c; if(RG.pop===cc){ RG.cb.onOpen&&RG.cb.onOpen(cc); } else setPop(cc,true); } };
     c.addEventListener("pointerup",up);
     c.addEventListener("pointercancel",()=>{ if(RG.drag&&RG.drag.mode==="swipe"&&RG.cb.onSwipeMove) RG.cb.onSwipeMove(null); RG.drag=null; });
+    rst.addEventListener("click",()=>{ RG.rest=TILT0; RG.user=false; RG.rst.hidden=true; RG.w=.12; if(RG.pop) setPop(null,true); });
     lab.addEventListener("click",e=>{ const b=e.target.closest("[data-c]"); if(!b) return; const cc=b.dataset.c; if(RG.pop===cc) RG.cb.onOpen&&RG.cb.onOpen(cc); else setPop(cc,true); });
     let last=performance.now();
     const loop=now=>{ if(RG.dead) return; requestAnimationFrame(loop); if(document.hidden||!c.isConnected||!c.offsetParent) return;
@@ -155,9 +168,9 @@ S.ring=function(host,segs,cb){
           const m=RG.meshes.find(x=>x.userData.c===RG.pop); if(m){ const err=wrapPi(RG.th-(-Math.PI/2-m.userData.mid)), k=34;
             RG.w+=(-k*err-2*Math.sqrt(k)*RG.w)*dt; RG.th+=RG.w*dt; } }
         else { /* flywheel: viscous bearing pulls the speed toward a slow idle drift (none in calm mode) */
-          const w0=calm?0:.12, c0=.55; RG.w=w0+(RG.w-w0)*Math.exp(-c0*dt); if(Math.abs(RG.w-w0)<.002) RG.w=w0; RG.th+=RG.w*dt; }
+          const w0=calm||RG.user?0:.12, c0=RG.user?1.6:.55; RG.w=w0+(RG.w-w0)*Math.exp(-c0*dt); if(Math.abs(RG.w-w0)<.002) RG.w=w0; RG.th+=RG.w*dt; }
         /* tilt: damped spring back to rest, a touch under-damped so a push wobbles once */
-        const kt=38, ct=7.2; RG.pv+=(-kt*(RG.ph-TILT0)-ct*RG.pv)*dt; RG.ph+=RG.pv*dt; }
+        const kt=38, ct=7.2; RG.pv+=(-kt*(RG.ph-RG.rest)-ct*RG.pv)*dt; RG.ph+=RG.pv*dt; }
       RG.spin.rotation.z=RG.th;
       const tx=tilt?tilt.x:pointer.x, ty=tilt?tilt.y:pointer.y;
       RG.root.rotation.x=RG.ph+ty*.08; RG.root.rotation.y=tx*.14;
