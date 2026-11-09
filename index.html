@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<script>try{var a=JSON.parse(localStorage.getItem("artha:acc")||"\"\"");if(a)document.documentElement.setAttribute("data-acc",a);if(JSON.parse(localStorage.getItem("artha:calm")||"false"))document.documentElement.classList.add("calm");}catch(e){}</script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#04070C">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Artha</title>
+<link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icon-192.png"><link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Sora:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="app.css?v=3.8">
+</head>
+<body>
+<canvas id="bg3d" aria-hidden="true"></canvas>
+<div class="app" id="app">
+  <header class="top">
+    <button class="ib" id="menuBtn" aria-label="Menu"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 4.5v5M8 14.5v5"/></svg></button>
+    <div class="brand"><h1>Artha</h1><p id="syncLine"><span class="dot"></span><span id="syncTxt">Loading…</span></p></div>
+    <div class="acts">
+      <button class="ib" id="bellBtn" aria-label="Needs attention"><svg viewBox="0 0 24 24"><path d="M6 17V11a6 6 0 0 1 12 0v6l1.5 2h-15zM10 21h4"/></svg><span class="badge" id="bellN" hidden>0</span></button>
+      <button class="ib" id="eyeBtn" aria-label="Hide amounts"><svg viewBox="0 0 24 24"><path id="eyeP" d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/></svg></button>
+      <button class="ib" id="searchBtn" aria-label="Search"><svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 21 21"/></svg></button>
+    </div>
+  </header>
+  <div class="ptr" id="ptr"><span class="spin"></span><span id="ptrTxt">Pull to refresh</span></div>
+
+  <main id="viewInv">
+    <div class="whos" id="whos" role="group" aria-label="Whose money"><button data-w="all">Together</button><button data-w="Aditya">Aditya</button><button data-w="Spardha">Spardha</button></div>
+    <div class="segv" id="segv" role="group" aria-label="3D or list"><button id="viewRing" aria-pressed="true"><svg viewBox="0 0 24 24"><path d="M12 4a8 8 0 1 1-7.6 5.5"/><path d="M12 4v4M4.4 9.5l3.8 1.2" opacity=".55"/></svg>3D view</button><button id="viewList" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M9 7h11M9 12h11M9 17h11M4.5 7h.01M4.5 12h.01M4.5 17h.01"/></svg>List</button></div>
+    <section id="homeRing">
+      <div class="hero" id="hero">
+        <div class="faces" id="faces" role="button" tabindex="0" aria-label="Show the next figure"><div class="fc on" id="f0"></div><div class="fc r" id="f1"></div><div class="fc r" id="f2"></div></div>
+        <div class="meas" id="meas" role="group" aria-label="Figure"><button>Invested</button><button>Value today</button><button>Profit</button></div>
+      </div>
+      <div class="stage" id="stage"></div>
+      <div class="scope" id="scope" aria-hidden="true"></div>
+      <div class="legend" id="legend"></div>
+    </section>
+    <section id="ledger" hidden></section>
+  </main>
+
+  <main id="viewIns" hidden></main>
+</div>
+
+<nav class="tabbar" aria-label="Sections">
+  <button class="tb" id="tabInv" aria-pressed="true"><svg viewBox="0 0 24 24"><path d="M3 17l5-5 4 4 8-8M15 8h5v5"/></svg>Investments</button>
+  <button class="fab" id="addBtn" aria-label="Add"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+  <button class="tb" id="tabIns" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M12 3 20 6v6c0 4.5-3.4 8.2-8 9-4.6-.8-8-4.5-8-9V6l8-3z"/></svg>Insurance</button>
+</nav>
+
+<div class="upd" id="upd" role="dialog" aria-labelledby="updTitle" hidden>
+  <div class="upd-h"><span class="upd-i"><svg viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg></span>
+    <div class="upd-t"><b id="updTitle">A new version is ready</b><p id="updTxt"></p></div></div>
+  <div class="upd-b"><button type="button" id="updLater">Later</button><button type="button" id="updBtn">Update now</button></div>
+</div>
+<div class="scrim" id="scrim" hidden></div>
+<aside class="drawer" id="drawer" hidden aria-label="Menu">
+  <div class="dhead"><div><h2>Artha</h2><small id="verTxt"></small></div><button class="done" id="drawerDone" type="button">Close</button></div>
+  <div class="dgrid">
+    <button class="dt" type="button" id="dVals" style="--c:#3CF0D4"><span class="di"><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16zM14 6l4 4"/></svg></span><b>Update values</b><small>What it's worth today</small></button>
+    <button class="dt" type="button" id="dNps" style="--c:#FF8A3D"><span class="di"><svg viewBox="0 0 24 24"><path d="M3 18h18M7 18a5 5 0 0 1 10 0M12 8V5M5.6 11.6 3.8 9.8M18.4 11.6l1.8-1.8"/></svg></span><b>NPS</b><small id="dNpsS"></small></button>
+    <button class="dt" type="button" id="dIns" style="--c:#B18CFF"><span class="di"><svg viewBox="0 0 24 24"><path d="M12 3 20 6v6c0 4.5-3.4 8.2-8 9-4.6-.8-8-4.5-8-9V6l8-3z"/></svg></span><b>Insurance</b><small id="dInsS"></small></button>
+    <button class="dt" type="button" id="dTds" style="--c:#FFB547"><span class="di"><svg viewBox="0 0 24 24"><path d="M7 3h7l5 5v13H7zM14 3v5h5M10 14l2 2 4-4"/></svg></span><b>TDS · 26AS</b><small>Verify before your ITR</small></button>
+    <button class="dt" type="button" id="dChg" style="--c:#5B8CFF"><span class="di"><svg viewBox="0 0 24 24"><path d="M4 19V5M4 19h16M8 15l3-4 3 2 5-6"/></svg></span><b>Charges</b><small>Exact, year by year</small></button>
+    <button class="dt" type="button" id="dInbox" style="--c:#8B7CFF"><span class="di"><svg viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></svg></span><b>Claude inbox</b><small id="dInboxS"></small></button>
+  </div>
+  <details class="dset"><summary>Settings</summary>
+    <div><label class="k">Amounts</label><div class="seg" id="fAmt"></div></div>
+    <div><label class="k">Look</label><div class="seg" id="fMotion"></div></div>
+    <div><label class="k">Glow colour</label><div class="skins" id="fAcc"></div></div>
+    <div><label class="k">Your data</label><div class="grp2">
+      <a class="lnk" id="sheetLink" href="#" target="_blank" rel="noopener">Open the Google Sheet <span>›</span></a>
+      <a class="lnk" id="filesLink" href="#" target="_blank" rel="noopener">Open Artha files in Drive <span>›</span></a>
+      <button class="lnk" type="button" id="verBtn">Check for updates <span>›</span></button>
+      <button class="lnk danger" type="button" id="forgetBtn">Forget this phone <span>›</span></button>
+    </div></div>
+  </details>
+</aside>
+
+<div class="scr" id="scr" hidden>
+  <div class="bd" id="scrBody"></div>
+  <div class="dock2" id="scrDock"></div>
+</div>
+
+<div class="sheet" id="sheet" hidden>
+  <div class="bar2">
+    <button class="ib" id="closeSearch" aria-label="Close search"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+    <input id="q" type="search" placeholder="Search stocks, funds, bonds, policies" autocomplete="off">
+  </div>
+  <div class="res" id="res"></div>
+</div>
+
+<div class="add" id="addSheet" hidden>
+  <div class="hd">
+    <button class="ib" id="closeAdd" aria-label="Back"><svg viewBox="0 0 24 24"><path d="M19 12H5M11 6l-6 6 6 6"/></svg></button>
+    <h2 id="addTitle">New investment</h2>
+  </div>
+  <div class="abody">
+    <div class="aseg" id="aMode"><button data-m="in" aria-pressed="true">Invest · Buy</button><button data-m="out" aria-pressed="false">Withdraw · Sell</button></div>
+    <label class="adate"><svg viewBox="0 0 24 24"><path d="M4 6h16v14H4zM4 10h16M8 3v5M16 3v5"/></svg><span id="aDateTxt">Today</span><input type="date" id="aDate" aria-label="Date"></label>
+    <div class="apanel" id="aPanel">
+      <button type="button" class="who" id="aWhoBtn" aria-label="Whose money, tap to switch"><small>Whose</small><b id="aWho">Aditya</b></button>
+      <div class="aval num" id="aVal" aria-live="polite">0</div>
+      <button type="button" class="bk" id="aBack" aria-label="Delete last digit"><svg viewBox="0 0 28 20"><path d="M9 2h17v16H9L1 10z"/><path d="M14 6.5l7 7M21 6.5l-7 7"/></svg></button>
+    </div>
+    <div class="err" id="aErr" role="alert"></div>
+    <div class="pad" id="aPad">
+      <button type="button" data-k="1">1</button><button type="button" data-k="2">2</button><button type="button" data-k="3">3</button>
+      <button type="button" data-k="4">4</button><button type="button" data-k="5">5</button><button type="button" data-k="6">6</button>
+      <button type="button" data-k="7">7</button><button type="button" data-k="8">8</button><button type="button" data-k="9">9</button>
+      <button type="button" data-k="00">00</button><button type="button" data-k="0">0</button><button type="button" class="op" data-k="back" aria-label="Delete last digit"><svg viewBox="0 0 28 20"><path d="M9 2h17v16H9L1 10z"/><path d="M14 6.5l7 7M21 6.5l-7 7"/></svg></button>
+      <button type="button" class="choose" id="aChoose">Choose what it is</button>
+    </div>
+    <p class="hint" id="catHint" hidden>What is it?</p>
+    <div class="cgrid" id="aCats" hidden></div>
+    <div class="det" id="aDet" hidden></div>
+  </div>
+</div>
+
+<div class="esheet" id="eSheet" hidden><div class="box" id="eBox"></div></div>
+<div class="gate" id="gate" hidden><form id="gForm" autocomplete="off"><img class="logo" src="icon-192.png" alt=""><h2>Artha</h2><p id="gMsg">Enter the family passcode (once on this phone).</p>
+  <input id="gLink" type="url" placeholder="Paste the setup link" aria-label="Setup link" hidden>
+  <input id="gIn" type="password" autocomplete="off" aria-label="Passcode"><button type="submit">Open</button><div class="err" id="gErr" role="alert"></div></form></div>
+<div class="toast" id="toast" role="status" hidden></div>
+<input type="file" id="fileIn" hidden multiple>
+<script src="three.min.js" defer></script>
+<script src="scene.js?v=3.8" defer></script>
+<script src="app.js?v=3.8" defer></script>
+</body>
+</html>
