@@ -1,7 +1,7 @@
 /* Artha 3.9 — investments + insurance. Data lives in the "Artha – My Investments" Google Sheet via the Apps Script API. */
 (()=>{
 "use strict";
-const APP_VERSION="3.10.0";
+const APP_VERSION="3.11.0";
 /* Personal details (banks, platforms, the Claude project link) come from the backend after sign-in, so this public code holds none. */
 const CFG=()=>(typeof DATA!=="undefined"&&DATA&&DATA.cfg)||{};
 const PROJECT_URL=()=>{ const u=safeUrl(CFG().project); return u==="#"?"https://claude.ai/projects":u; };
@@ -122,7 +122,7 @@ let DATA=store.get("cache",null), CACHE_AT=store.get("cacheAt",0), OUT=store.get
 let M=null, WHO=store.get("who","all"); if(!["all","Aditya","Spardha"].includes(WHO)) WHO="all";
 const saveOut=()=>store.set("outbox",OUT);
 const BANK_RE=/\s*\[bank ([^\]]+)\]/, FY_RE=/\s*\[fy (\d{4})\]/, DUE_RE=/\s*\[due (\d{4}-\d{2}-\d{2})\]/, TDS_RE=/\s*\[tds ([\d.]+)\]/, NET_RE=/\s*\[net ([\d.]+)\]/, PR_RE=/\s*\[p ([\d.]+)\]/;
-const cleanNote=n=>String(n||"").replace(/\s*\[bal\]\s*/,"").replace(BANK_RE,"").replace(FY_RE,"").replace(DUE_RE,"").replace(TDS_RE,"").replace(NET_RE,"").replace(PR_RE,"").trim();
+const cleanNote=n=>String(n||"").replace(/\s*\[bal\]\s*/,"").replace(/\s*\[ca [^\]]+\]\s*/,"").replace(/\s*\[since [^\]]+\]\s*/,"").replace(BANK_RE,"").replace(FY_RE,"").replace(DUE_RE,"").replace(TDS_RE,"").replace(NET_RE,"").replace(PR_RE,"").trim();
 
 /* records (insurance, bond schedules, inbox) — server copy + changes waiting to sync */
 function recMap(){ const R=new Map(); ((DATA&&DATA.rec)||[]).forEach(r=>R.set(r[0],{id:r[0],kind:r[1],d:r[2]||{}}));
@@ -160,6 +160,27 @@ function estCharges(side,val){ if(!(val>0)) return 0; const brk=Math.max(5,Math.
   return Math.round((brk+stt+exc+sebi+stamp+gst+dp)*100)/100; }
 const r2=x=>Math.round(x*100)/100, r4=x=>Math.round(x*10000)/10000;
 
+/* ---------- holdings, and corporate actions (demerger, merger, name change, split) ----------
+   A corporate action is a pair of rows paid via "Switch" with a "[ca <id>]" note tag: a Sell that takes shares and/or cost out of
+   the old holding and a Buy that puts them into the new one. Quantity and cost move exactly; price is never touched; no money moves. */
+const CA_RE=/\[ca ([^\]]+)\]/, SINCE_RE=/\[since (\d{4}-\d{2}-\d{2})\]/;
+const isCA=r=>r.via==="Switch"&&(r.asset==="Stocks"||r.asset==="US Stocks")&&(r.type==="Buy"||r.type==="Sell");
+const holdKey=r=>r.acct+"|"+r.who+"|"+r.asset+"|"+(r.asset==="Mutual Funds"?keyName(r.name):nkey(r.name));
+function holdMap(rows,until){ const hm=new Map();
+  rows.filter(r=>(r.asset==="Stocks"||r.asset==="US Stocks"||r.asset==="Mutual Funds")&&(!until||r.date<=until)).forEach(r=>{
+    const k=holdKey(r); let h=hm.get(k);
+    if(!h){ h={key:k,who:r.who,acct:r.acct,plat:r.acct,asset:r.asset,a:homeOfRow(r.asset),tab:r.acct+"|"+r.who+"|"+homeOfRow(r.asset),name:r.name,isin:r.code,qty:0,inv:0,px:0,pxd:"",date:r.date,upd:r.date,since:"",ca:0,us:r.asset==="US Stocks"}; hm.set(k,h); }
+    if(r.type==="Value"){ if(r.price&&r.date>=h.pxd){ h.px=r.price; h.pxd=r.date; } return; }
+    if(isCA(r)){ const sn=(SINCE_RE.exec(r.note||"")||[])[1]; h.ca++;
+      if(r.type==="Buy"){ if(h.qty<1e-6&&!h.inv) h.since=""; h.qty+=r.qty; h.inv+=r.amount; if(sn&&(!h.since||sn<h.since)) h.since=sn; }
+      else { h.qty=Math.max(0,h.qty-r.qty); h.inv=Math.max(0,h.inv-r.amount); } }
+    else if(r.type==="Buy"){ if(h.qty<1e-6) h.since=""; h.qty+=r.qty; h.inv+=r.amount; if(!h.since) h.since=r.date; if(r.qty&&r.date>=h.pxd){ h.px=r.amount/r.qty; h.pxd=r.date; } }
+    else if(r.type==="Bonus"){ h.qty+=r.qty; if(!h.since) h.since=r.date; }
+    else if(r.type==="Sell"||r.type==="Redeem"){ const q=r.qty||(h.px?r.amount/h.px:0), fr=h.qty>0?Math.min(1,q/h.qty):1; h.inv-=h.inv*fr; h.qty=Math.max(0,h.qty-q); if(r.qty&&r.date>=h.pxd){ h.px=r.amount/r.qty; h.pxd=r.date; } }
+    else return;
+    h.upd=r.date; if(r.name&&r.name.length>h.name.length&&r.asset!=="Mutual Funds") h.name=r.name; if(r.code) h.isin=r.code; });
+  return hm; }
+
 function build(){
   const D=(DATA&&DATA.v===3)?DATA:{led:[],rec:[]}, today=TODAY(), rec=recMap();
   let rows=D.led.map(r=>({id:r[0],date:r[1],who:r[2]||"Aditya",acct:r[3],asset:r[4],type:r[5],name:r[6],code:r[7],qty:+r[8]||0,price:+r[9]||0,amount:+r[10]||0,via:r[11],note:r[12],row:r[13]}));
@@ -172,7 +193,8 @@ function build(){
   const tx=[], units=new Map(), U=(acct,who,h)=>{ const k=acct+"|"+who+"|"+h; if(!units.has(k)) units.set(k,{tab:k,acct,who,h,a:h,T:[],inv:0,out:0,net:0,cur:0,cash:0,valued:false,gain:null,x:null,flows:null,asof:"",src:"",V:[]}); return units.get(k); };
   const push=(r,h,amt,extra)=>{ const t=Object.assign({i:tx.length,id:r.id,cat:r.acct+"|"+r.who+"|"+h,date:r.date,who:r.who,acct:r.acct,p:prettyAcct(r.acct),p0:platOf(r.acct),a:h,h,type:r.type,asset:r.asset,name:r.name,code:r.code,qty:r.qty,price:r.price,show:r.amount,amt,via:r.via,
       note:r.note,note2:cleanNote(r.note),row:r.row,pending:r.pending,src:r},extra||{});
-    if((r.asset==="Stocks"||r.asset==="US Stocks")&&(r.type==="Buy"||r.type==="Sell")&&r.qty) t.trade={side:r.type==="Buy"?"B":"S",qty:r.qty,price:r.price||(r.qty?r.amount/r.qty:0)};
+    if(isCA(r)){ t.ca=(CA_RE.exec(r.note||"")||[])[1]||"action"; t.type=r.type==="Buy"?"CA in":"CA out"; }
+    else if((r.asset==="Stocks"||r.asset==="US Stocks")&&(r.type==="Buy"||r.type==="Sell")&&r.qty) t.trade={side:r.type==="Buy"?"B":"S",qty:r.qty,price:r.price||(r.qty?r.amount/r.qty:0)};
     if(r.asset==="Mutual Funds"&&r.qty) t.units=r.qty;
     t.bank=(BANK_RE.exec(r.note||"")||[])[1]||""; t.fy=(FY_RE.exec(r.note||"")||[])[1]||"";
     t.due=(DUE_RE.exec(r.note||"")||[])[1]||""; t.tds=+((TDS_RE.exec(r.note||"")||[])[1]||0); t.net=+((NET_RE.exec(r.note||"")||[])[1]||0); t.pr=+((PR_RE.exec(r.note||"")||[])[1]||0);
@@ -192,16 +214,7 @@ function build(){
     if(r.via==="Balance"||r.asset==="Cash"||r.asset==="F&O"){ const u=U(r.acct,r.who,"Stocks"), s={"Add money":1,"Sell":1,"Redeem":1,"Dividend":1,"Other income":1,"F&O result":1,"Withdraw":-1,"Buy":-1,"Charges":-1}[r.type]||0; u.cash+=s*A; }
   });
   /* holdings: quantity from buys, sells and bonuses; price from the latest valuation or trade */
-  const hm=new Map();
-  rows.filter(r=>r.asset==="Stocks"||r.asset==="US Stocks"||r.asset==="Mutual Funds").forEach(r=>{
-    const k=r.acct+"|"+r.who+"|"+r.asset+"|"+(r.asset==="Mutual Funds"?keyName(r.name):nkey(r.name)); let h=hm.get(k);
-    if(!h){ h={key:k,who:r.who,acct:r.acct,plat:r.acct,asset:r.asset,a:homeOfRow(r.asset),tab:r.acct+"|"+r.who+"|"+homeOfRow(r.asset),name:r.name,isin:r.code,qty:0,inv:0,px:0,pxd:"",date:r.date,upd:r.date,us:r.asset==="US Stocks"}; hm.set(k,h); }
-    if(r.type==="Value"){ if(r.price&&r.date>=h.pxd){ h.px=r.price; h.pxd=r.date; } return; }
-    if(r.type==="Buy"){ h.qty+=r.qty; h.inv+=r.amount; if(r.qty&&r.date>=h.pxd){ h.px=r.amount/r.qty; h.pxd=r.date; } }
-    else if(r.type==="Bonus") h.qty+=r.qty;
-    else if(r.type==="Sell"||r.type==="Redeem"){ const q=r.qty||(h.px?r.amount/h.px:0), fr=h.qty>0?Math.min(1,q/h.qty):1; h.inv-=h.inv*fr; h.qty=Math.max(0,h.qty-q); if(r.qty&&r.date>=h.pxd){ h.px=r.amount/r.qty; h.pxd=r.date; } }
-    else return;
-    h.upd=r.date; if(r.name&&r.name.length>h.name.length&&r.asset!=="Mutual Funds") h.name=r.name; if(r.code) h.isin=r.code; });
+  const hm=holdMap(rows);
   for(const h of hm.values()){ if(h.asset!=="Mutual Funds") continue; const n=NAV[keyName(h.name)]; if(n&&n.d>=h.pxd){ h.px=n.nav; h.pxd=n.d; h.nav=n; } }
   const hold=[...hm.values()].filter(h=>h.qty>1e-6).map(h=>Object.assign(h,{cur:h.qty*h.px,avg:h.qty?h.inv/h.qty:0,date:h.pxd||h.upd,moved:h.upd>h.pxd}));
   ["Stocks","Mutual Funds"].forEach(a=>hold.filter(h=>h.a===a).sort((x,y)=>y.cur-x.cur).forEach((h,k)=>h.col=AVC[k%AVC.length]));
@@ -402,14 +415,15 @@ function bondRow(b){ const pr=b.exp>0?Math.min(1,b.repaid/b.exp):(b.closed?1:0),
     <div class="m"><span>${esc(whoVia(b.who,b.acct))}</span><span>${b.closed?`<span class="tag ok">Repaid</span>`:due?`<span class="tag due">Due ${fmtDs(b.next.d)}</span>`:b.next?"Next "+fmtDs(b.next.d)+(b.next.a?" · "+money(b.next.a,true):""):"No date"}</span></div>
     <div class="prog"><i style="width:${(pr*100).toFixed(1)}%;background:${b.closed?"var(--ok)":CLS.Bonds.col};box-shadow:0 0 10px ${b.closed?"var(--ok)":CLS.Bonds.col}"></i></div></button>`; }
 const TXT={"Add money":"Money added","Withdraw":"Money taken out","Buy":"Bought","Sell":"Sold","Bonus":"Bonus / split shares","Redeem":"Redeemed","Payout":"Money back","Dividend":"Dividend","Other income":"Other income","Charges":"Charges","F&O result":"F&O result","Premium":"Premium paid","Moved":"Paid from balance","Moved in":"Back to balance"};
-function txTitle(t){ if(t.type==="Premium") return "Term premium"; if(t.type==="Add money"||t.type==="Withdraw") return t.a==="Others"?(t.type==="Add money"?"NPS contribution":"NPS withdrawal"):TXT[t.type]+" · "+t.p0;
+function txTitle(t){ if(t.type==="Premium") return "Term premium";
+  if(t.ca){ const k=caKind(t.ca); return (t.type==="CA in"?k+" · in ":k+" · out of ")+(t.name||""); } if(t.type==="Add money"||t.type==="Withdraw") return t.a==="Others"?(t.type==="Add money"?"NPS contribution":"NPS withdrawal"):TXT[t.type]+" · "+t.p0;
   if(t.type==="Moved") return "Paid for "+(t.name||"a fund"); if(t.type==="Moved in") return "Back to balance · "+(t.name||"");
   if(t.type==="F&O result") return t.show<0?"F&O loss":"F&O profit"; if(t.type==="Charges") return t.note2||"Charges";
   return (TXT[t.type]||t.type)+(t.name?" "+t.name:""); }
 const txNeg=t=>OUTT.has(t.type)||t.type==="Moved"||(t.type==="F&O result"&&t.show<0);
 const BACKT=new Set(["Withdraw","Sell","Redeem","Payout"]);
 function txRow(t,k,no){ const neg=txNeg(t), v=Math.abs(t.show), back=BACKT.has(t.type);
-  return `<button class="tx" data-tx="${t.i}" style="--k:${Math.min(k||0,12)}"><span class="n">${no?`<i class="sn num">${no}</i>`:""}${esc(txTitle(t))}</span><span class="amt num ${back?"gain":neg?"loss":""}">${t.type==="Bonus"?"+"+qtyf(t.qty):(back?"↩ ":neg?"−":"")+money(v)}</span>
+  return `<button class="tx" data-tx="${t.i}" style="--k:${Math.min(k||0,12)}"><span class="n">${no?`<i class="sn num">${no}</i>`:""}${esc(txTitle(t))}</span><span class="amt num ${t.ca?"":back?"gain":neg?"loss":""}">${t.ca?(t.qty?(t.type==="CA in"?"+":"−")+qtyf(t.qty)+" sh · ":"")+"cost "+money(v,true):t.type==="Bonus"?"+"+qtyf(t.qty):(back?"↩ ":neg?"−":"")+money(v)}</span>
     <span class="m"><span>${[fmtDs(t.date),t.acct?whoVia(t.who,t.acct):t.who,t.trade?qtyf(t.trade.qty)+" @ "+rsx(t.trade.price):""].filter(Boolean).map(esc).join(" · ")}</span>${t.pending?`<span class="chip sync">Syncing…</span>`:""}</span></button>`; }
 function bindRows(el){
   el.querySelectorAll("[data-hold]").forEach(b=>b.onclick=()=>holdSheet(M.hold[+b.dataset.hold]));
@@ -520,7 +534,7 @@ function yearList(L,pre,lbl){
   const done=L.filter(t=>!t.pending); let no=done.length; const NO=new Map(done.map(t=>[t,no--]));
   return ys.map(y=>{ const R=L.filter(t=>(t.date?t.date.slice(0,4):"No date")===y), open=ACT.has(pre+y), ab=t=>Math.abs(t.show||0);
     /* what went in (bought / invested) and what came back (sold / redeemed / repaid), as shown on the rows */
-    const inn=SUM(R.filter(t=>!BACKT.has(t.type)&&!txNeg(t)&&t.type!=="Bonus"),ab), out=SUM(R.filter(t=>BACKT.has(t.type)),ab);
+    const inn=SUM(R.filter(t=>!BACKT.has(t.type)&&!txNeg(t)&&t.type!=="Bonus"&&!t.ca),ab), out=SUM(R.filter(t=>BACKT.has(t.type)),ab);
     const sum=lbl?[inn?`${lbl[0]} ${money(inn,true)}`:"",out?`<span class="gain">${lbl[1]} ${money(out,true)}</span>`:""].filter(Boolean).join(" · "):money(SUM(R,ab),true);
     return `<button class="gh" data-yr="${pre+y}" aria-expanded="${open}" style="width:100%"><span>${open?"▾":"▸"} ${y} · ${R.length}</span><b class="num">${sum}</b></button>${open?`<div class="grp">${R.map((t,k)=>txRow(t,k,NO.get(t))).join("")}</div>`:""}`; }).join("")
     +`<p class="hint">Tap an entry to see, edit or delete it</p>`; }
@@ -655,13 +669,15 @@ const dl=F=>`<dl class="elist">${F.filter(Boolean).map(([k,v])=>`<dt>${esc(k)}</
 const closeBtn=`<button class="x" type="button" data-close>Close</button>`;
 function holdSheet(h){ if(!h) return; const isMF=h.a==="Mutual Funds", all=holdFor(h.a,"all"), share=SUM(all,x=>x.cur)?h.cur/SUM(all,x=>x.cur):null, gp=h.inv?h.gain/h.inv:null;
   const orders=M.tx.filter(t=>t.a===h.a&&t.cat===h.tab&&t.name&&keyName(t.name)===keyName(h.name));
-  const fl=orders.filter(t=>t.date&&["Buy","Sell","Redeem"].includes(t.type)).map(t=>[t.date,t.type==="Buy"?-t.show:t.show]); if(h.cur>0) fl.push([M.today,h.cur]); const hx=xirr(fl);
+  const fl=orders.filter(t=>t.date&&["Buy","Sell","Redeem"].includes(t.type)).map(t=>[t.date,t.type==="Buy"?-t.show:t.show]); if(h.cur>0) fl.push([M.today,h.cur]); const hx=h.ca?null:xirr(fl);
   openE(`<div class="eamt num" style="color:var(--ink)">${money(h.cur,false)}</div><div class="t">${esc(h.name)}</div>
-    ${dl([["Gain",`<span class="${cls(h.gain)}">${smoney(h.gain)}${gp!=null?" ("+pct(gp)+")":""}</span>`],["Invested",money(h.inv,false)],hx!=null?["Return a year (XIRR)",`<span class="${cls(hx)}">${pct(hx)}</span>`]:null,[isMF?"Units":"Quantity",h.qty?qtyf(h.qty):"—"],!isMF&&h.avg?["Average buy price",money(h.avg,false)]:null,
+    ${dl([["Gain",`<span class="${cls(h.gain)}">${smoney(h.gain)}${gp!=null?" ("+pct(gp)+")":""}</span>`],["Invested",money(h.inv,false)],hx!=null?["Return a year (XIRR)",`<span class="${cls(hx)}">${pct(hx)}</span>`]:null,[isMF?"Units":"Quantity",h.qty?qtyf(h.qty):"—"],!isMF&&h.avg?["Average buy price",money(h.avg,false)]:null,h.since?["Held since",fmtD(h.since)+(h.ca?" (incl. the company it came from)":"")]:null,
       !isMF&&h.qty?["Last price",money(h.cur/h.qty,false)]:null,isMF&&h.qty?[h.nav?"NAV · "+fmtDs(h.nav.d):"NAV (last known)",HIDE?"••":"₹"+(h.cur/h.qty).toFixed(4)]:null,h.nav?["Scheme (AMFI)",esc(h.nav.sn)]:null,["Investor",esc(h.who)],["Platform",esc(h.plat)],
       share!=null?["Share of all "+(isMF?"funds":"stocks"),pctp(share)]:null,h.isin?["ISIN",esc(h.isin)]:null,["As of",fmtD(h.upd||h.date)]])}
     ${orders.length?`<div class="gh"><span>Your entries · ${orders.length}</span><b class="num">${money(SUM(orders,t=>t.type==="Buy"?t.show:t.type==="Sell"||t.type==="Redeem"?-t.show:0),true)}</b></div><div class="list">${orders.slice().sort((a,b)=>a.date<b.date?1:-1).map(txRow).join("")}</div>`:""}
-    <div class="btns"><button class="x" type="button" id="hSell">${isMF?"Redeem":"Sell"}</button><button class="go" type="button" id="hBuy">${isMF?"Invest more":"Buy more"}</button></div>${closeBtn}`);
+    <div class="btns"><button class="x" type="button" id="hSell">${isMF?"Redeem":"Sell"}</button><button class="go" type="button" id="hBuy">${isMF?"Invest more":"Buy more"}</button></div>
+    ${isMF?"":`<button class="x" type="button" id="hCA">Demerger, merger, split or name change…</button>`}${closeBtn}`);
+  if($("hCA")) $("hCA").onclick=()=>caSheet(h);
   const pre={a:h.a,inv:h.who,acct:h.acct,name:h.name,type:h.us?"us":h.a==="Mutual Funds"?"mf":"stocks"}; $("hBuy").onclick=()=>{ ov.back(); setTimeout(()=>openAdd("in",pre),80); }; $("hSell").onclick=()=>{ ov.back(); setTimeout(()=>openAdd("out",pre),80); }; }
 function fundSheet(id){ const f=fundsFromOrders("all").find(x=>x.id===id); if(!f) return;
   openE(`<div class="eamt num" style="color:var(--ink)">${money(f.net,false)}</div><div class="t">${esc(f.name)}</div>
@@ -670,7 +686,7 @@ function fundSheet(id){ const f=fundsFromOrders("all").find(x=>x.id===id); if(!f
 function txSheet(t){ if(!t) return; const r=t.src||{}, link=M.url&&t.row?safeUrl(`${M.url}#gid=${encodeURIComponent(M.gid)}&range=A${Number(t.row)||1}`):"", neg=txNeg(t);
   openE(`<div class="eamt num" style="color:${neg?"var(--spend)":"var(--ink)"}">${t.type==="Bonus"?"+"+qtyf(t.qty)+" shares":moneyX(Math.abs(t.show))}</div><div class="t">${esc(txTitle(t))}</div>
     ${dl([["Date",fmtD(t.date)],["Whose money",esc(t.who)],["Account",esc(t.acct)],t.name?["Name",esc(t.name)]:null,t.qty?[t.asset==="Mutual Funds"?"Units":"Quantity",qtyf(t.qty)]:null,t.price?["Price",moneyX(t.price)]:null,
-      ["Type",esc(t.type)],t.via?["Paid via",esc(t.via==="Balance"?"Account balance":t.via)]:null,t.bank?["Bank",esc(t.bank)]:null,t.tds?["TDS deducted (your income, paid as tax)",moneyX(t.tds)]:null,t.pr?["Principal part",moneyX(t.pr)]:null,t.net?["Reached the bank",moneyX(t.net)]:null,t.note2?["Note",esc(t.note2)]:null,t.id&&!t.pending?["Entry",esc(t.id)]:null])}
+      ["Type",esc(t.ca?"Corporate action ("+caKind(t.ca).toLowerCase()+")":t.type)],t.via?["Paid via",esc(t.via==="Balance"?"Account balance":t.via)]:null,t.bank?["Bank",esc(t.bank)]:null,t.tds?["TDS deducted (your income, paid as tax)",moneyX(t.tds)]:null,t.pr?["Principal part",moneyX(t.pr)]:null,t.net?["Reached the bank",moneyX(t.net)]:null,t.note2?["Note",esc(t.note2)]:null,t.id&&!t.pending?["Entry",esc(t.id)]:null])}
     <div class="s">${t.pending?"Waiting to sync":link?`<a href="${esc(link)}" target="_blank" rel="noopener">Open in the sheet</a>`:""}</div>
     ${t.internal?"":`<div class="btns"><button class="x" type="button" id="tDel">Delete entry</button></div>`}${closeBtn}`);
   const del=$("tDel"); if(del) del.onclick=()=>confirmSheet("Delete this entry?",`${txTitle(t)} · ${fmtD(t.date)}. It is removed from the Ledger in your sheet.`,"Delete",()=>{
@@ -703,14 +719,15 @@ function openGain(){ const R=HOME.map(h=>agg(h,WHO)).filter(r=>r.U.length);
 /* ---------- the bell: everything that needs you ---------- */
 function bellItems(){ const due=dueItems("all"), soon=soonItems("all",30), ib=recs("inbox").filter(r=>r.d.status==="new"||r.d.status==="ready"), ren=renewals(45);
   const chg=chargeYears("all").filter(x=>x.open), tds=tdsYears("all").filter(x=>x.due||x.status==="mismatch");
-  const dc=CHECKS();
-  return {due,soon,ib,ren,chg,tds,dc,n:dc.length+due.length+ib.filter(r=>r.d.status==="ready").length+ren.filter(x=>x.left<=30).length+chg.filter(x=>x.ended).length+tds.length}; }
+  const dc=CHECKS(), ca=caPending();
+  return {due,soon,ib,ren,chg,tds,dc,ca,n:ca.length+dc.length+due.length+ib.filter(r=>r.d.status==="ready").length+ren.filter(x=>x.left<=30).length+chg.filter(x=>x.ended).length+tds.length}; }
 function paintBell(){ if(!M) return; const B=bellItems(); $("bellN").hidden=!B.n; $("bellN").textContent=B.n>9?"9+":B.n; $("bellBtn").classList.toggle("ring",B.n>0);
   $("dInboxS").innerHTML=recs("inbox").some(r=>r.d.status==="new")?`<span class="tag due">${recs("inbox").filter(r=>r.d.status==="new").length} waiting</span>`:"›"; }
 function openBell(){ const B=bellItems(), wait=B.ib.filter(r=>r.d.status==="new"), ready=B.ib.filter(r=>r.d.status==="ready");
   const row=(x,tag)=>`<button class="hl" data-pr="${esc(x.b.key)}|${esc(x.e.d)}"><span class="av" style="background:${tag==="due"?"var(--accent)":CLS.Bonds.col};color:#111">${dOf(x.e.d).getDate()}</span><div style="min-width:0"><div class="n">${esc(x.b.name)}</div><div class="m">${tag==="due"?"Due "+fmtD(x.e.d)+" · did it arrive?":"Due "+fmtD(x.e.d)}</div></div><div class="r"><b class="num">${x.e.a?money(x.e.a,true):"—"}</b><small>${tag==="due"?`<span class="tag due">Confirm</span>`:"expected"}</small></div></button>`;
   let h=`<div class="t big">Needs attention</div>`;
   if(B.dc.length) h+=`<div class="gh"><span>Data checks · phone vs sheet</span><b class="num">${B.dc.length}</b></div><div class="list">${B.dc.map(x=>`<button class="hl" data-dc="${esc(x.id)}"><span class="av" style="background:${x.sev==="bad"?"#FF5D73":"var(--accent)"};color:#111">${svgI("check","#111",18)}</span><div style="min-width:0"><div class="n">${esc(x.title)}</div><div class="m">${esc(x.sub)}</div></div><div class="r"><small><span class="tag ${x.sev==="bad"?"bad":"due"}">${x.sev==="bad"?"Fix":"Check"}</span></small></div></button>`).join("")}</div>`;
+  if(B.ca.length) h+=`<div class="gh"><span>Corporate actions to apply</span><b class="num">${B.ca.length}</b></div><button class="ai" id="bCA">${svgI("spark","var(--neon2)")}<span><b>${esc([...new Set(B.ca.map(x=>CA_KIND[x.a.kind]+" · "+x.a.to))].join(", "))}</b><small>${B.ca.length} holding${B.ca.length>1?"s":""} · moves the purchase cost as announced</small></span></button>`;
   if(ready.length) h+=`<div class="gh"><span>Claude has read · review</span><b class="num">${ready.length}</b></div><div class="list">${ready.map(inboxRow).join("")}</div>`;
   if(B.due.length) h+=`<div class="gh"><span>Repayments to confirm</span><b class="num">${B.due.length}</b></div><div class="list">${B.due.map(x=>row(x,"due")).join("")}</div>`;
   if(B.ren.length) h+=`<div class="gh"><span>Insurance renewals</span><b class="num">${B.ren.length}</b></div><div class="list">${B.ren.map(x=>`<button class="hl" data-pol="${esc(x.pol.id)}"><span class="av" style="background:${polCol(x.pol)}">${svgI(polIcon(x.pol),"#fff",20)}</span><div style="min-width:0"><div class="n">${esc(x.pol.d.title)}</div><div class="m">${x.left<0?"Expired "+fmtD(x.end):"Ends "+fmtD(x.end)}</div></div><div class="r"><b class="num">${x.left<0?"—":x.left+"d"}</b><small><span class="tag ${x.left<0?"bad":"due"}">${x.left<0?"Expired":"Renew"}</span></small></div></button>`).join("")}</div>`;
@@ -720,7 +737,7 @@ function openBell(){ const B=bellItems(), wait=B.ib.filter(r=>r.d.status==="new"
   if(B.soon.length) h+=`<div class="gh"><span>Coming up · 30 days</span><b class="num">${money(SUM(B.soon,x=>x.e.a),true)}</b></div><div class="list">${B.soon.map(x=>row(x,"soon")).join("")}</div>`;
   if(!B.dc.length&&!B.due.length&&!B.ib.length&&!B.ren.length&&!B.soon.length&&!B.tds.length&&!B.chg.length) h+=`<div class="empty">All clear. Nothing needs you right now.</div>`;
   h+=closeBtn;
-  openE(h); const pb=$("bProc"); if(pb) pb.onclick=processNow;
+  openE(h); const pb=$("bProc"); if(pb) pb.onclick=processNow; const bca=$("bCA"); if(bca) bca.onclick=caKnownSheet;
   $("eBox").querySelectorAll("[data-dc]").forEach(b=>b.onclick=()=>openCheck(b.dataset.dc));
   $("eBox").querySelectorAll("[data-tdsb]").forEach(b=>b.onclick=()=>{ const [fy,p2]=b.dataset.tdsb.split("|"); tdsUpload(+fy,p2); });
   $("eBox").querySelectorAll("[data-chgb]").forEach(b=>b.onclick=()=>{ const i=b.dataset.chgb.lastIndexOf("|"); chargesUpload({acct:b.dataset.chgb.slice(0,i),fy:+b.dataset.chgb.slice(i+1)}); }); }
@@ -1552,6 +1569,60 @@ addEventListener("scroll",upCheck,{passive:true}); $("scrBody").addEventListener
 const ACC=[["","Cyan","#3CF0D4"],["violet","Violet","#A98BFF"],["amber","Amber","#FFB547"],["rose","Rose","#FF6FA8"],["ice","Ice","#7CC8FF"]];
 function segs(id,opts,cur,on){ const el=$(id); el.innerHTML=opts.map(([k,l])=>`<button type="button" data-k="${k}" aria-pressed="${k===cur}">${l}</button>`).join(""); el.querySelectorAll("button").forEach(b=>b.onclick=()=>{ on(b.dataset.k); buildDrawer(); }); }
 function setCalm(on){ store.set("calm",on); document.documentElement.classList.toggle("calm",on); if(S3.setCalm) S3.setCalm(on); refresh(); }
+/* ---------- corporate actions ----------
+   CA_KNOWN: public, announced actions with the official cost split, so Artha can offer them by itself (bell + holding sheet).
+   Add new ones here: id (unique), kind, date (record date), from (old name words), to (new name), ratio (new shares per share held),
+   cost (% of the old cost that moves to the new company; demerger only), src. Anything not listed can be entered by hand. */
+const CA_KNOWN=[
+  {id:"tatamotors-2025",kind:"demerger",date:"2025-10-14",from:"TATA MOTORS",fromNot:"",to:"Tata Motors Limited",ratio:1,cost:31.15,
+   src:"Tata Motors filing to NSE/BSE, 12 Nov 2025: 68.85% of cost stays with Tata Motors Passenger Vehicles, 31.15% goes to Tata Motors Ltd (commercial vehicles)",
+   match:h=>/TATA MOTORS PASS/.test(nkey(h.name))||(/^TATA MOTORS/.test(nkey(h.name))&&!/LIMITED$/.test(nkey(h.name)))}
+];
+const CA_KIND={demerger:"Demerger",merger:"Merger",rename:"Name change",split:"Split / consolidation"};
+const caKind=id=>{ const k=CA_KNOWN.find(x=>x.id===id); if(k) return CA_KIND[k.kind]; const m=/^(demerger|merger|rename|split)/.exec(id||""); return m?CA_KIND[m[1]]:"Corporate action"; };
+const caDone=(id,acct,who)=>M.rows.some(r=>r.acct===acct&&r.who===who&&(CA_RE.exec(r.note||"")||[])[1]===id);
+/* rows for one action on one holding (account + whose money). Old holding as it stood on the action date. */
+function caRows(a,par){ const st=[...holdMap(M.rows,a.date).values()], old=st.find(h=>h.key===par.key)||null; if(!old||old.qty<1e-6) return {err:"No shares of "+par.name+" on "+fmtD(a.date)+"."};
+  const same=a.kind==="split", toName=same?par.name:a.to.trim(); if(!toName) return {err:"Enter the new company's name."};
+  const tk=par.acct+"|"+par.who+"|"+par.asset+"|"+nkey(toName), have=same?0:(holdMap(M.rows).get(tk)||{qty:0}).qty;
+  const mv=a.kind==="demerger"?r2(old.inv*(+a.cost||0)/100):r2(old.inv), outQ=a.kind==="demerger"?0:old.qty;
+  const want=r4(old.qty*(+a.ratio||0)), inQ=same?want:Math.max(0,r4(want-have));
+  if(!(+a.ratio>0)) return {err:"Enter how many new shares you got for each share."};
+  if(a.kind==="demerger"&&!(+a.cost>0&&+a.cost<100)) return {err:"Enter the % of cost that moves to the new company."};
+  const tag=`[ca ${a.id}] [since ${old.since||old.date}]`, base={date:a.date,who:par.who,acct:par.acct,asset:par.asset,code:"",price:"",via:"Switch"};
+  const L=[]; if(mv>0||outQ) L.push({...base,type:"Sell",name:old.name,qty:outQ||"",amt:mv,note:`${tag} ${CA_KIND[a.kind]}: ${outQ?qtyf(outQ)+" shares and ":""}${a.kind==="demerger"?a.cost+"% of cost":"cost"} moved to ${toName}`});
+  if(mv>0||inQ) L.push({...base,type:"Buy",name:toName,qty:inQ||"",amt:mv,note:`${tag} ${CA_KIND[a.kind]}: ${inQ?qtyf(inQ)+" shares and ":""}cost from ${old.name}${have&&!same?` (${qtyf(have)} shares were already in Artha)`:""}`});
+  return {rows:L.filter(r=>r.amt>0),old,mv,inQ,outQ,have,toName}; }
+function caPending(){ if(!M) return []; const L=[]; CA_KNOWN.forEach(a=>{ const seen=new Set();
+  [...holdMap(M.rows,a.date).values()].filter(h=>(h.asset==="Stocks")&&h.qty>1e-6&&a.match(h)).forEach(h=>{ const k=h.acct+"|"+h.who; if(seen.has(k)||caDone(a.id,h.acct,h.who)) return; seen.add(k); L.push({a,h}); }); }); return L; }
+function caApply(L){ let n=0; L.forEach(({a,h})=>{ const R=caRows(a,h); if(R.rows&&R.rows.length){ OUT.push({kind:"add",rows:R.rows,rid:rid()}); n++; } });
+  if(n){ saveOut(); refresh(); flush(); } return n; }
+function caKnownSheet(){ const L=caPending(); if(!L.length){ showToast("Nothing to apply."); return; }
+  openE(`<div class="t big">Corporate actions to apply</div><div class="s" style="text-align:left">Artha moves the shares and the purchase cost exactly as announced. No money moves and your totals don't change; only the split between the two stocks does.</div>
+    ${L.map(({a,h})=>{ const R=caRows(a,h); return `<div class="sect"><b>${esc(CA_KIND[a.kind])} · ${esc(h.name)} → ${esc(a.to)}</b><div class="s" style="text-align:left;margin-top:6px">${esc(whoVia(h.who,h.acct))} · ${fmtD(a.date)}<br>${R.err?esc(R.err):`Cost moved: ${moneyX(R.mv)} of ${moneyX(R.old.inv)}${R.inQ?` · new shares ${qtyf(R.inQ)}`:R.have?` · ${qtyf(R.have)} new shares already in Artha`:""}`}<br><small>${esc(a.src)}</small></div></div>`; }).join("")}
+    <button class="go" type="button" id="caGo">Apply</button>${closeBtn}`);
+  $("caGo").onclick=()=>{ const n=caApply(L); ov.back(); if(n) celebrate("Applied",`${n} holding${n>1?"s":""} updated`); }; }
+/* by hand, from a holding: demerger, merger, name change, split or consolidation */
+function caSheet(h){ const kn=CA_KNOWN.filter(a=>a.match(h)&&!caDone(a.id,h.acct,h.who)); let kind="demerger";
+  const draw=()=>{ const dem=kind==="demerger", spl=kind==="split";
+    openE(`<div class="t big">${esc(h.name)}</div><div class="s" style="text-align:left">${esc(whoVia(h.who,h.acct))}</div>
+      ${kn.length?`<button class="ai" id="caKn">${svgI("spark","var(--neon2)")}<span><b>Apply ${esc(CA_KIND[kn[0].kind].toLowerCase())} into ${esc(kn[0].to)}</b><small>Announced cost split ${kn[0].cost?kn[0].cost+"% to the new company":""} · ${fmtD(kn[0].date)}</small></span></button>`:""}
+      <div class="fld"><span>What happened</span><div class="seg sm wrap" id="caK">${Object.entries(CA_KIND).map(([k,l])=>`<button type="button" data-v="${k}" aria-pressed="${k===kind}">${l}</button>`).join("")}</div></div>
+      <label class="fld"><span>Record date</span><input id="caD" type="date" max="${M.today}" value=""></label>
+      ${spl?"":`<label class="fld"><span>${dem?"New company you got shares of":"New name / company"}</span><input id="caTo" autocomplete="off" placeholder="As your broker shows it"></label>`}
+      <label class="fld"><span>${spl?"New shares for each old share (2-for-1 split = 2; 1-for-10 = 0.1)":dem?"New shares for each share you held":"New shares for each old share (name change = 1)"}</span><input id="caR" inputmode="decimal" value="${kind==="rename"?1:""}"></label>
+      ${dem?`<label class="fld"><span>% of your cost that moves to the new company</span><input id="caC" inputmode="decimal" placeholder="From the company's filing, e.g. 31.15"></label>`:""}
+      <div class="s" id="caP" style="text-align:left"></div>
+      <button class="go" type="button" id="caOk" disabled>Save</button>${closeBtn}`);
+    $("caK").onclick=e=>{ const b=e.target.closest("button"); if(b){ kind=b.dataset.v; draw(); } };
+    const kb=$("caKn"); if(kb) kb.onclick=()=>{ const n=caApply([{a:kn[0],h}]); ov.back(); if(n) celebrate("Applied",kn[0].to); };
+    let R=null; const calc=()=>{ const d=$("caD").value; const a={id:kind+"-"+(d||"").replace(/-/g,"")+"-"+nkey(h.name).split(" ")[0].toLowerCase(),kind:kind==="rename"?"merger":kind,date:d,to:spl?h.name:($("caTo")||{}).value||"",ratio:numIn($("caR").value),cost:dem?numIn($("caC").value):0};
+      if(kind==="rename") a.id=a.id.replace(/^merger/,"rename");
+      R=d?caRows(a,h):{err:"Pick the record date."}; $("caOk").disabled=!!R.err||!R.rows.length;
+      $("caP").innerHTML=R.err?esc(R.err):spl?`On ${fmtD(d)} you held ${qtyf(R.old.qty)} shares costing ${moneyX(R.old.inv)}. They become ${qtyf(R.inQ)} shares; the cost stays the same. No money moves.`:`On ${fmtD(d)} you held ${qtyf(R.old.qty)} shares costing ${moneyX(R.old.inv)}.<br>${R.outQ?`${qtyf(R.outQ)} shares and `:""}${moneyX(R.mv)} of cost move to ${esc(R.toName)}${R.inQ?` (${qtyf(R.inQ)} new shares)`:R.have?` (${qtyf(R.have)} shares already in Artha)`:""}. No money moves.`; };
+    $("eBox").querySelectorAll("#caD,#caTo,#caR,#caC").forEach(x=>x.oninput=calc);
+    $("caOk").onclick=()=>{ if(!R||R.err) return; OUT.push({kind:"add",rows:R.rows,rid:rid()}); saveOut(); ov.back(); refresh(); flush(); celebrate("Saved",CA_KIND[kind]); }; };
+  draw(); }
 /* ---------- menu tools: returns by account, winners & losers, upcoming money ---------- */
 const whoAcct=u=>u.acct+(u.who!==holderOf(u.acct)?` · ${u.who}'s money`:"");
 function toolReturns(){ const U=M.units.filter(u=>u.h!=="Others"&&u.h!=="Term"&&(u.cur>0||u.net>0)&&okWho(u.who,WHO)).sort((a,b)=>(b.x??-9)-(a.x??-9));
@@ -1561,8 +1632,7 @@ function toolReturns(){ const U=M.units.filter(u=>u.h!=="Others"&&u.h!=="Term"&&
       return `<div class="hl"><span class="av" style="background:${CLS[h].col}">${svgI(CLS[h].icon,"#fff",18)}</span><div style="min-width:0"><div class="n">${esc(whoAcct(u))}</div><div class="m">Put in ${money(u.net)} · now ${money(u.cur)}</div></div><div class="r"><b class="num ${cls(u.x)}">${pct(u.x)}</b><small class="${cls(u.gain)}">${u.gain==null?"—":smoney(u.gain,true)}${g!=null?" · "+pct(g):""}</small></div></div>`; }).join("")}</div>`; }).join("")}
     <p class="hint">Bonds: XIRR counts repayments still to come.</p>${closeBtn}`); }
 function toolMovers(){ let sort=store.get("mvSort","loss"), grp=store.get("mvGrp","Stocks");
-  const fb=new Map(); M.rows.forEach(r=>{ if(r.type!=="Buy"||!r.date) return; const k=r.acct+"|"+r.who+"|"+r.asset+"|"+(r.asset==="Mutual Funds"?keyName(r.name):nkey(r.name)); if(!fb.has(k)||r.date<fb.get(k)) fb.set(k,r.date); });
-  const draw=()=>{ const H=M.hold.filter(h=>h.a===grp&&okWho(h.who,WHO)&&h.inv>0).map(h=>({h,g:h.gain,p:h.gain/h.inv,since:fb.get(h.key)||""}));
+  const draw=()=>{ const H=M.hold.filter(h=>h.a===grp&&okWho(h.who,WHO)&&h.inv>0).map(h=>({h,g:h.gain,p:h.gain/h.inv,since:h.since||""}));
     H.sort((a,b)=>sort==="loss"?a.p-b.p:sort==="gain"?b.p-a.p:b.g-a.g);
     const tg=SUM(H,x=>x.g);
     openE(`<div class="t big">Winners and losers</div>
