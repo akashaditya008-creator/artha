@@ -1,7 +1,7 @@
 /* Artha 3.9 — investments + insurance. Data lives in the "Artha – My Investments" Google Sheet via the Apps Script API. */
 (()=>{
 "use strict";
-const APP_VERSION="3.9.2";
+const APP_VERSION="3.9.3";
 /* Personal details (banks, platforms, the Claude project link) come from the backend after sign-in, so this public code holds none. */
 const CFG=()=>(typeof DATA!=="undefined"&&DATA&&DATA.cfg)||{};
 const PROJECT_URL=()=>{ const u=safeUrl(CFG().project); return u==="#"?"https://claude.ai/projects":u; };
@@ -9,7 +9,7 @@ const $=id=>document.getElementById(id);
 const store={get(k,d){try{const v=localStorage.getItem("artha:"+k);return v==null?d:JSON.parse(v);}catch(e){return d;}},set(k,v){try{localStorage.setItem("artha:"+k,JSON.stringify(v));}catch(e){}}};
 const esc=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 /* links from the sheet, Drive or Claude: only https:// is allowed (never javascript: or data:) */
-const safeUrl=u=>{ try{ const x=new URL(String(u||""),location.href); if(x.protocol==="https:") return x.href; }catch(e){} return "#"; };
+const safeUrl=u=>{ if(!u) return "#"; try{ const x=new URL(String(u),location.href); if(x.protocol==="https:") return x.href; }catch(e){} return "#"; };
 const SUM=(a,f)=>a.reduce((s,x)=>s+(f?f(x):x),0);
 const splitPr=v=>{ const i=v.lastIndexOf("|"); return [v.slice(0,i),v.slice(i+1)]; };
 const rid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
