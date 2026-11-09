@@ -4,7 +4,7 @@
 //   file from the server is never shown: the last good copy is served instead.
 // · "artha-good" keeps the last version that started properly on this phone. If a new version fails to start,
 //   the page asks for a rollback and this worker serves that copy until the next update.
-const C="artha-v18", G="artha-good", META="artha-meta";
+const C="artha-v19", G="artha-good", META="artha-meta";
 const F=["./","index.html","app.css","app.js","scene.js","three.min.js","manifest.webmanifest","icon-192.png","icon-512.png"];
 const MIN={"./":4000,"index.html":4000,"app.js":60000,"app.css":20000,"scene.js":8000,"three.min.js":100000};
 const MARK={"./":'src="app.js',"index.html":'src="app.js',"app.js":"__arthaOK","scene.js":"Scene3D"};
@@ -17,8 +17,9 @@ function good(key,r){ if(!r||!r.ok) return Promise.resolve(null); if(!MIN[key]) 
   return r.clone().text().then(t=>t.length>=MIN[key]&&(!MARK[key]||t.indexOf(MARK[key])>=0)?r:null,()=>null); }
 self.addEventListener("install",e=>{ e.waitUntil(caches.open(C).then(c=>Promise.all(F.map(k=>fetch(new Request(k,{cache:"reload"})).then(r=>good(k,r)).then(r=>r?c.put(k,r):null).catch(()=>null)))).then(()=>self.skipWaiting())); });
 self.addEventListener("activate",e=>{ e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k.startsWith("artha-")&&k!==C&&k!==G&&k!==META).map(k=>caches.delete(k)))).then(()=>self.clients.claim())); });
-self.addEventListener("message",e=>{ const d=e.data||{};
-  if(d.t==="good") e.waitUntil(Promise.all([caches.open(C),caches.open(G)]).then(([c,g])=>Promise.all(F.map(k=>c.match(k).then(r=>r?g.put(k,r):null)))).then(()=>getMode()).then(m=>m==="good"?null:setMode("live")));
+self.addEventListener("message",e=>{ if(e.origin&&e.origin!==location.origin) return; const d=e.data||{};
+  /* only a version running live is promoted; while rolled back, the saved copy stays as it is */
+  if(d.t==="good") e.waitUntil(getMode().then(m=>m==="good"?null:Promise.all([caches.open(C),caches.open(G)]).then(([c,g])=>Promise.all(F.map(k=>c.match(k).then(r=>r?g.put(k,r):null))))));
   if(d.t==="rollback") e.waitUntil(caches.open(G).then(g=>g.match("index.html")).then(r=>r?setMode("good"):null));
   if(d.t==="live") e.waitUntil(setMode("live"));
 });

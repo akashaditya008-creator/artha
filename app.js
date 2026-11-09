@@ -1,7 +1,7 @@
 /* Artha 3.9 — investments + insurance. Data lives in the "Artha – My Investments" Google Sheet via the Apps Script API. */
 (()=>{
 "use strict";
-const APP_VERSION="3.9";
+const APP_VERSION="3.9.1";
 const PROJECT_URL="https://claude.ai/project/01a1965d-e312-704a-8114-16f0090c8706";
 const $=id=>document.getElementById(id);
 const store={get(k,d){try{const v=localStorage.getItem("artha:"+k);return v==null?d:JSON.parse(v);}catch(e){return d;}},set(k,v){try{localStorage.setItem("artha:"+k,JSON.stringify(v));}catch(e){}}};
@@ -1196,7 +1196,7 @@ function fdSched(P,rate,start,end,pay,comp){ const r=rate/100, S=[]; if(!(P>0&&r
 function bankRow(d,acct,opt){ const O=otherBanks(acct), extra=opt.extra||[], cur=d.via==="Balance"?"__bal":d.bank, more=d.bankMore||O.some(x=>x[0]===cur);
   const L=bankList(acct).concat(more?O:[]), who2=[...new Set(O.map(x=>x[0].split(" · ")[1]))].join(" / ");
   return `<div class="fld"><span>${opt.label}</span><div class="banks" id="dBank">${extra.map(([v,l])=>`<button type="button" data-v="${v}" aria-pressed="${cur===v}"><i style="--bc:var(--neon)"></i>${esc(l)}</button>`).join("")}
-    ${L.map(([b,tag,c])=>`<button type="button" data-v="${esc(b)}" aria-pressed="${cur===b}"><i style="--bc:${c}"></i>${esc(b)}${tag?` <small>${tag}</small>`:""}</button>`).join("")}${(more||!O.length?"":`<button type="button" data-v="__more" aria-pressed="false" class="bmore">+ ${esc(who2)}'s bank</button>`)}</div>${opt.hint?`<small class="hint" style="display:block;margin-top:6px">${opt.hint}</small>`:""}</div>`; }
+    ${L.map(([b,tag,c])=>`<button type="button" data-v="${esc(b)}" aria-pressed="${cur===b}"><i style="--bc:${esc(c)}"></i>${esc(b)}${tag?` <small>${esc(tag)}</small>`:""}</button>`).join("")}${(more||!O.length?"":`<button type="button" data-v="__more" aria-pressed="false" class="bmore">+ ${esc(who2)}'s bank</button>`)}</div>${opt.hint?`<small class="hint" style="display:block;margin-top:6px">${opt.hint}</small>`:""}</div>`; }
 /* cash sitting in a broker balance for one account + whose money */
 function cashOf(acct,who){ const u=(M.units||[]).find(x=>x.acct===acct&&x.who===who&&x.h==="Stocks"); return u?r2(u.cash):0; }
 const MFSTAMP=0.00005; // stamp duty on mutual fund purchases (0.005%)
@@ -1236,11 +1236,11 @@ function drawDet(){
     ${mf?`<label class="fld"><span>${inv?"Amount paid ₹":"Amount received ₹ (optional)"}</span><input id="dAmt" inputmode="decimal" value="${esc(d.amt||"")}" autocomplete="off"></label>
       <label class="fld"><span>${inv?"Units (optional, from the order)":"Units to redeem"}</span><input id="dQty" inputmode="decimal" value="${esc(d.qty||"")}" autocomplete="off"></label>
       ${hsel?`<button type="button" class="addr" id="dAll">Redeem all ${qtyf(hsel.qty)} units</button>`:""}<div class="calc" id="dCalc"></div>`:""}
-    ${term?"":`<div class="fld"><span>Whose money</span><div class="seg sm" id="dWho">${WHOS.map(w=>`<button type="button" data-v="${w}" aria-pressed="${A.who===w}">${w}</button>`).join("")}</div></div>`}
+    ${term?"":`<div class="fld"><span>Whose money</span><div class="seg sm" id="dWho">${WHOS.map(w=>`<button type="button" data-v="${esc(w)}" aria-pressed="${A.who===w}">${esc(w)}</button>`).join("")}</div></div>`}
     ${term?"":`<div class="fld"><span>${oth?"Where (bank, post office, platform…)":"Account"}</span><div class="seg sm wrap" id="dAcct">${showA.map(a=>`<button type="button" data-v="${esc(a)}" aria-pressed="${!d.acctOther&&a===d.acct}">${esc(a)}</button>`).join("")}<button type="button" data-v="__o" aria-pressed="${!!d.acctOther}">New${showA.length?" account":""}</button></div>${d.acctOther?`<input id="dAcctO" value="${esc(d.acct||"")}" maxlength="50" placeholder="e.g. ${oth?"Post office":"HDFC Bank"} · ${esc(A.who)}">`:""}${d.acct&&holderOf(d.acct)!==A.who&&!nps?`<small class="hint" style="display:block;margin-top:6px">${esc(A.who)}'s money in ${esc(holderOf(d.acct))}'s account — tracked as ${esc(A.who)}'s.</small>`:""}</div>`}
     ${viaRow}
     ${oth&&inv?othFields(d):""}${oth&&!inv?`<label class="fld"><span>Amount taken out ₹</span><input id="dAmt" inputmode="decimal" value="${esc(d.amt||"")}" autocomplete="off"></label><div class="fld"><span>What was it</span><div class="seg sm" id="dKind"><button type="button" data-v="w" aria-pressed="${d.kind!=="i"}">Withdrawal / closed</button><button type="button" data-v="i" aria-pressed="${d.kind==="i"}">Interest / payout</button></div></div>`:""}
-    ${fd?`<div class="btns"><label class="fld"><span>Interest rate (% a year)</span><input id="dRate" inputmode="decimal" value="${esc(d.rate||"")}"></label><label class="fld"><span>Matures on</span><input id="dEnd" type="date" value="${esc(d.end||"")}" min="${A.date}"></label></div>
+    ${fd?`<div class="btns"><label class="fld"><span>Interest rate (% a year)</span><input id="dRate" inputmode="decimal" value="${esc(d.rate||"")}"></label><label class="fld"><span>Matures on</span><input id="dEnd" type="date" value="${esc(d.end||"")}" min="${esc(A.date)}"></label></div>
       <div class="fld"><span>Interest is paid</span><div class="seg sm" id="dFdPay"><button type="button" data-v="end" aria-pressed="${d.fdPay==="end"}">At maturity</button><button type="button" data-v="q" aria-pressed="${d.fdPay==="q"}">Every quarter</button><button type="button" data-v="m" aria-pressed="${d.fdPay==="m"}">Every month</button></div></div>
       <div class="calc" id="dFdC"></div>${remindSeg("dRem",d.remind,"Remind me when money is due")}`:""}
     ${isBond&&inv?`<div class="fld"><span>Repayment dates · amount back each time (before TDS)</span><div id="dReps" style="display:grid;gap:8px">${d.reps.map((r,i)=>`<div class="rr"><input type="date" value="${esc(r.d)}" aria-label="Repayment date ${i+1}"><input inputmode="numeric" placeholder="₹ amount" value="${esc(r.a)}" aria-label="Amount ${i+1}"><button type="button" data-rm="${i}" aria-label="Remove">×</button></div>`).join("")}</div>${d.reps.length<60?`<button type="button" class="addr" id="dAddR">+ Add another date</button>`:""}</div>
@@ -1249,7 +1249,7 @@ function drawDet(){
     <label class="fld"><span>${inv?"Note (optional)":"Reason (optional)"}</span><textarea id="dNote" rows="2" maxlength="250">${esc(d.note||"")}</textarea></label>
     <div class="err" id="dErr" role="alert"></div><button type="button" class="btn1" id="dSave">${inv?(term?"Save premium":isBond?"Save bond":fd?"Save FD":stock?"Save buy":"Save"):stock?"Save sale":isBond?"Save payout":"Save withdrawal"}</button>`;
   const seg=(id,fn)=>{ const el=$(id); if(el) el.querySelectorAll("[data-v]").forEach(b=>b.onclick=()=>{ keep(); fn(b.dataset.v); drawDet(); }); };
-  seg("dWho",v=>{ A.who=v; paintWho(); if(nps) d.acct="NPS · "+v;
+  seg("dWho",v=>{ if(!WHOS.includes(v)) return; A.who=v; paintWho(); if(nps) d.acct="NPS · "+v;
     else if(!d.acctPicked&&!d.acctOther&&holderOf(d.acct)!==v){ const tw=AC.find(a=>platOf(a)===platOf(d.acct)&&holderOf(a)===v); if(tw){ d.acct=tw; d.bank=bankPick(tw); } } });
   seg("dAcct",v=>{ if(v==="__o"){ d.acctOther=1; d.acct=""; setTimeout(()=>$("dAcctO")&&$("dAcctO").focus(),30); } else { d.acctOther=0; d.acct=v; d.acctPicked=1; d.bank=bankPick(v); } });
   seg("dBank",v=>{ if(v==="__more"){ d.bankMore=1; return; } if(v==="__bal") d.via="Balance"; else { d.via="Bank"; d.bank=v; } });
@@ -1285,7 +1285,7 @@ function othFields(d){ const dated=d.till==="date";
     <div class="fld"><span>How it earns</span><div class="seg sm wrap" id="dRet"><button type="button" data-v="rate" aria-pressed="${d.ret==="rate"}">Fixed rate (ROI)</button><button type="button" data-v="sum" aria-pressed="${d.ret==="sum"}">Fixed amount on a date</button><button type="button" data-v="mkt" aria-pressed="${d.ret==="mkt"}">Varies (market)</button><button type="button" data-v="none" aria-pressed="${d.ret==="none"}">No return</button></div></div>
     ${d.ret==="rate"?`<div class="btns"><label class="fld"><span>Rate % a year</span><input id="dRate" inputmode="decimal" value="${esc(d.rate||"")}"></label><div class="fld"><span>Compounds</span><div class="seg sm" id="dComp">${[["y","Yearly"],["q","Quarterly"],["m","Monthly"],["s","Simple"]].map(([k,l])=>`<button type="button" data-v="${k}" aria-pressed="${d.comp===k}">${l}</button>`).join("")}</div></div></div>`:""}
     ${d.ret!=="sum"?`<div class="fld"><span>Runs</span><div class="seg sm" id="dTill"><button type="button" data-v="date" aria-pressed="${dated}">Until a fixed date</button><button type="button" data-v="open" aria-pressed="${!dated}">Till I withdraw</button></div></div>`:""}
-    ${dated||d.ret==="sum"?`<label class="fld"><span>${d.ret==="sum"?"You get the amount on":"Fixed return date (maturity)"}</span><input id="dEnd" type="date" value="${esc(d.end||"")}" min="${A.date}"></label>`:""}
+    ${dated||d.ret==="sum"?`<label class="fld"><span>${d.ret==="sum"?"You get the amount on":"Fixed return date (maturity)"}</span><input id="dEnd" type="date" value="${esc(d.end||"")}" min="${esc(A.date)}"></label>`:""}
     ${d.ret==="sum"?`<label class="fld"><span>Amount you get back ₹</span><input id="dExp" inputmode="decimal" value="${esc(d.exp||"")}"></label>`:""}
     ${d.ret==="rate"&&dated?`<div class="fld"><span>Interest is paid</span><div class="seg sm" id="dOPay">${[["end","At the end"],["m","Monthly"],["q","Quarterly"],["y","Yearly"]].map(([k,l])=>`<button type="button" data-v="${k}" aria-pressed="${d.fdPay===k}">${l}</button>`).join("")}</div></div>`:""}
     <div class="calc" id="dOthC"></div>${(d.ret==="rate"&&dated)||d.ret==="sum"?remindSeg("dRem",d.remind,"Remind me when money is due"):""}`; }
@@ -1502,7 +1502,7 @@ async function reconcile(d,prev){ if(!d.fp||!crypto.subtle) return;
   const diffs=[]; if(all.length!==d.fp.n||await sha16(all.join("\u001e"))!==d.fp.h){
     const keys=new Set(Object.keys(U).concat(Object.keys(d.fp.u||{})));
     for(const k of keys){ const a=U[k], b=(d.fp.u||{})[k]; const h=a?await sha16(a.c.join("\u001e")):"";
-      if(!a||!b||a.n!==b.n||!same(Math.round(a.s*100)/100,b.s)||h!==b.h) diffs.push(`${k.replace("|"," · ")}: phone ${a?a.n:0} rows ₹${a?Math.round(a.s).toLocaleString("en-IN"):0} · sheet ${b?b.n:0} rows ₹${b?Math.round(b.s).toLocaleString("en-IN"):0}`); } }
+      if(!a||!b||a.n!==b.n||!same(Math.round(a.s*100)/100,b.s)||h!==b.h) diffs.push(`${k.split("|").join(" · ")}: phone ${a?a.n:0} rows ₹${a?Math.round(a.s).toLocaleString("en-IN"):0} · sheet ${b?b.n:0} rows ₹${b?Math.round(b.s).toLocaleString("en-IN"):0}`); } }
   ISSUES=ISSUES.filter(i=>i.key!=="fp"); if(diffs.length) issue({key:"fp",sev:"bad",title:"Phone and sheet don't agree",sub:"Pull to refresh; if it stays, tap for details",detail:diffs.join("\n")}); saveIssues();
   /* outside edits */
   const snap=store.get("snap",null), now={}; led.forEach(r=>now[r[0]]=canon(r));
