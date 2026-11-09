@@ -103,7 +103,8 @@ const avColor=s=>{ let h=0; for(const ch of String(s)) h=(h*31+ch.charCodeAt(0))
 /* ---------- model: one Ledger. Every entry = date · whose money · account · asset · type · name · qty · price · amount ---------- */
 const WHOS=["Aditya","Spardha"], WHOC={Aditya:"#5B8CFF",Spardha:"#E86CC8"};
 const ACCT0=["Groww · Aditya","Groww · Spardha","Wint · Aditya","Wint · Spardha","Grip · Aditya","Grip · Spardha","Stable Money · Aditya","Stable Money · Spardha","INDmoney · Aditya","INDmoney · Spardha","NPS · Aditya"];
-const prettyAcct=a=>/ · /.test(a||"")?String(a).replace(" · "," (")+")":String(a||""), holderOf=a=>/spardha/i.test(a)?"Spardha":"Aditya", platOf=a=>String(a||"").split(" · ")[0];
+const whoVia=(who,a)=>{ if(!/ · /.test(a||"")) return (who?who+" · ":"")+String(a||""); const h=holderOf(a), p=platOf(a); return !who||h===who?`${h} on ${p}`:`${who}'s money on ${h}'s ${p}`; },
+prettyAcct=a=>/ · /.test(a||"")?String(a).replace(" · "," (")+")":String(a||""), holderOf=a=>/spardha/i.test(a)?"Spardha":"Aditya", platOf=a=>String(a||"").split(" · ")[0];
 const keyName=s=>String(s).toLowerCase().replace(/[^a-z0-9 ]/g," ").split(/\s+/).filter(w=>w&&!/^(fund|direct|growth|plan|regular|option|the|idcw|ltd|limited)$/.test(w)).slice(0,4).join(" ");
 const nkey=s=>String(s||"").toUpperCase().replace(/[^A-Z0-9]+/g," ").trim();
 /* which home group an entry belongs to */
@@ -360,7 +361,13 @@ function renderHome(){
   fitHome(); if(list) drawList(); else drawRing(); paintBell();
 }
 /* the 3D home is one screen: no page scroll, the ring takes whatever height is left */
-function fitHome(){ const on=!$("viewInv").hidden&&VIEW!=="list"; document.documentElement.classList.toggle("homefit",on); if(on) scrollTo(0,0); }
+function fitHome(){ const on=!$("viewInv").hidden&&VIEW!=="list", v=$("viewInv"); document.documentElement.classList.toggle("homefit",on);
+  if(!on){ v.style.height=""; return; } scrollTo(0,0);
+  /* measured, not guessed: the home ends just above the + button / tab bar, whatever the phone's bars and safe areas are */
+  requestAnimationFrame(()=>{ const top=v.getBoundingClientRect().top, lim=Math.min($("addBtn").getBoundingClientRect().top,document.querySelector(".tabbar").getBoundingClientRect().top)-8;
+    v.style.height=Math.max(320,Math.floor(lim-top))+"px"; }); }
+addEventListener("resize",()=>{ if(document.documentElement.classList.contains("homefit")) fitHome(); });
+if(window.visualViewport) visualViewport.addEventListener("resize",()=>{ if(document.documentElement.classList.contains("homefit")) fitHome(); });
 $("segv").onclick=e=>{ const b=e.target.closest("button"); if(!b) return; VIEW=b.id==="viewList"?"list":"chart"; store.set("view",VIEW); renderHome(); };
 (()=>{ const h=$("hero"), fc=$("faces"); let x0=null,y0=null,sw=0;
   /* the figure follows the finger, then snaps to the next one */
@@ -386,7 +393,7 @@ function fundsFromOrders(who,h){ const m=new Map(); txFor(h||"Mutual Funds",who)
 const fundOrderRow=(f,k)=>`<button class="hl" data-fund="${esc(f.id)}" style="--k:${k||0}"><span class="av" style="background:${avColor(f.name)}">${esc(initials(f.name))}</span><div style="min-width:0"><div class="n">${esc(f.name)}</div><div class="m">${f.n} order${f.n===1?"":"s"}${WHO==="all"?" · "+f.who:""}</div></div><div class="r"><b class="num">${money(f.net,true)}</b><small>invested</small></div></button>`;
 function bondRow(b){ const pr=b.exp>0?Math.min(1,b.repaid/b.exp):(b.closed?1:0), due=b.next&&b.next.d<=M.today;
   return `<button class="brow" data-bond="${esc(b.key)}"><div class="a"><span class="n">${esc(b.name)}</span><span class="v num">${money(b.cost,true)}</span></div>
-    <div class="m"><span>${esc(b.platL)}${WHO==="all"?" · "+b.who:""}</span><span>${b.closed?`<span class="tag ok">Repaid</span>`:due?`<span class="tag due">Due ${fmtDs(b.next.d)}</span>`:b.next?"Next "+fmtDs(b.next.d)+(b.next.a?" · "+money(b.next.a,true):""):"No date"}</span></div>
+    <div class="m"><span>${esc(whoVia(b.who,b.acct))}</span><span>${b.closed?`<span class="tag ok">Repaid</span>`:due?`<span class="tag due">Due ${fmtDs(b.next.d)}</span>`:b.next?"Next "+fmtDs(b.next.d)+(b.next.a?" · "+money(b.next.a,true):""):"No date"}</span></div>
     <div class="prog"><i style="width:${(pr*100).toFixed(1)}%;background:${b.closed?"var(--ok)":CLS.Bonds.col};box-shadow:0 0 10px ${b.closed?"var(--ok)":CLS.Bonds.col}"></i></div></button>`; }
 const TXT={"Add money":"Money added","Withdraw":"Money taken out","Buy":"Bought","Sell":"Sold","Bonus":"Bonus / split shares","Redeem":"Redeemed","Payout":"Money back","Dividend":"Dividend","Other income":"Other income","Charges":"Charges","F&O result":"F&O result","Premium":"Premium paid","Moved":"Paid from balance","Moved in":"Back to balance"};
 function txTitle(t){ if(t.type==="Premium") return "Term premium"; if(t.type==="Add money"||t.type==="Withdraw") return t.a==="Others"?(t.type==="Add money"?"NPS contribution":"NPS withdrawal"):TXT[t.type]+" · "+t.p0;
@@ -394,9 +401,10 @@ function txTitle(t){ if(t.type==="Premium") return "Term premium"; if(t.type==="
   if(t.type==="F&O result") return t.show<0?"F&O loss":"F&O profit"; if(t.type==="Charges") return t.note2||"Charges";
   return (TXT[t.type]||t.type)+(t.name?" "+t.name:""); }
 const txNeg=t=>OUTT.has(t.type)||t.type==="Moved"||(t.type==="F&O result"&&t.show<0);
-function txRow(t,k){ const neg=txNeg(t), v=Math.abs(t.show);
-  return `<button class="tx" data-tx="${t.i}" style="--k:${Math.min(k||0,12)}"><span class="n">${esc(txTitle(t))}</span><span class="amt num ${neg?"loss":""}">${t.type==="Bonus"?"+"+qtyf(t.qty):(neg?"−":"")+money(v)}</span>
-    <span class="m"><span>${[fmtDs(t.date),WHO==="all"?t.who:"",t.p,t.trade?qtyf(t.trade.qty)+" @ "+rs(t.trade.price,false):""].filter(Boolean).map(esc).join(" · ")}</span>${t.pending?`<span class="chip sync">Syncing…</span>`:""}</span></button>`; }
+const BACKT=new Set(["Withdraw","Sell","Redeem","Payout"]);
+function txRow(t,k){ const neg=txNeg(t), v=Math.abs(t.show), back=BACKT.has(t.type);
+  return `<button class="tx" data-tx="${t.i}" style="--k:${Math.min(k||0,12)}"><span class="n">${esc(txTitle(t))}</span><span class="amt num ${back?"gain":neg?"loss":""}">${t.type==="Bonus"?"+"+qtyf(t.qty):(back?"↩ ":neg?"−":"")+money(v)}</span>
+    <span class="m"><span>${[fmtDs(t.date),t.acct?whoVia(t.who,t.acct):t.who,t.trade?qtyf(t.trade.qty)+" @ "+rs(t.trade.price,false):""].filter(Boolean).map(esc).join(" · ")}</span>${t.pending?`<span class="chip sync">Syncing…</span>`:""}</span></button>`; }
 function bindRows(el){
   el.querySelectorAll("[data-hold]").forEach(b=>b.onclick=()=>holdSheet(M.hold[+b.dataset.hold]));
   el.querySelectorAll("[data-fund]").forEach(b=>b.onclick=()=>fundSheet(b.dataset.fund));
@@ -409,7 +417,7 @@ function bindRows(el){
 
 /* ---------- category screens (header scrolls with the page) ---------- */
 let SC=null; const ACT=new Set();
-const TABS3={Stocks:["Holdings","Balance","Growth","Charges","Activity"],"Mutual Funds":["Holdings","Growth","Activity"],Bonds:["Bonds","Payouts","TDS","Activity"],NPS:["Growth","Activity"],Other:["Items","Growth","Activity"]};
+const TABS3={Stocks:["Holdings","Balance","Growth","Charges","History"],"Mutual Funds":["Holdings","Growth","History"],Bonds:["Bonds","Payouts","TDS","History"],NPS:["Growth","History"],Other:["Items","Growth","History"]};
 const scrHead=(t,sub)=>`<div class="hd"><button class="ib" data-back aria-label="Back"><svg viewBox="0 0 24 24"><path d="M19 12H5M11 6l-6 6 6 6"/></svg></button><h2>${esc(t)}</h2>${sub||""}</div>`;
 function openScr(h,opts){ SC=Object.assign({h,tab:(TABS3[h]||[])[0]||"",sort:"value"},opts||{}); ACT.clear(); S3.theme(h==="pol"?"ins":h); renderScr();
   if(!isOpen($("scr"))) ov.open($("scr"),()=>{ vanish($("scr")); SC=null; S3.theme(TAB_NOW==="ins"?"ins":"home"); upCheck(); }); else { const b=$("scrBody"); b.classList.remove("swap"); void b.offsetWidth; b.classList.add("swap"); }
@@ -432,7 +440,7 @@ function renderScr(){
   const T=[].concat(...r.U.map(u=>u.T));
   if(SC.tab==="Holdings") x+=holdBody(h);
   else if(SC.tab==="Growth") x+=`<div id="gChart"></div><div id="fChart"></div>`;
-  else if(SC.tab==="Activity") x+=actBody(T);
+  else if(SC.tab==="History") x+=actBody(T,h);
   else if(SC.tab==="Bonds") x+=bondsBody();
   else if(SC.tab==="Payouts") x+=`<div id="pChart"></div>`+payoutList();
   else if(SC.tab==="Items") x+=itemsBody();
@@ -443,7 +451,7 @@ function renderScr(){
     :h==="NPS"?`<div class="in"><button class="btn2" data-act="npsval">Update value</button><button class="btn1" data-act="add">Add contribution</button></div>`
     :h==="Other"?`<div class="in"><button class="btn2" data-act="vals">Update value</button><button class="btn1" data-act="add">Add</button></div>`
     :`<div class="in"><button class="btn2" data-act="vals">Update value</button><button class="btn1" data-act="add">${h==="Stocks"?"Buy or sell":"Add"}</button></div>`;
-  B.innerHTML=x; bindScr(B);
+  B.style.setProperty("--c",c.col); B.innerHTML=x; bindScr(B);
   if(SC.tab==="Growth"){ growthChart($("gChart"),r.U,c.col); flowChart($("fChart"),T); }
   if(SC.tab==="Payouts") payoutChart($("pChart"));
 }
@@ -452,6 +460,10 @@ function bindScr(B){ const dk=$("scrDock");
   B.querySelectorAll("#sWho [data-w]").forEach(b=>b.onclick=()=>setWho(b.dataset.w));
   B.querySelectorAll("#sTabs [data-t]").forEach(b=>b.onclick=()=>{ SC.tab=b.dataset.t; const top=$("scrBody").scrollTop; renderScr(); $("scrBody").scrollTop=Math.min(top,$("sTabs")?$("sTabs").offsetTop-6:0); });
   B.querySelectorAll("[data-sort]").forEach(b=>b.onclick=()=>{ SC.sort=b.dataset.sort; renderScr(); });
+  const keepTop=fn=>{ const t=$("scrBody").scrollTop; fn(); renderScr(); $("scrBody").scrollTop=t; };
+  B.querySelectorAll("[data-bseg]").forEach(b=>b.onclick=()=>keepTop(()=>SC.bseg=b.dataset.bseg));
+  B.querySelectorAll("[data-pmode]").forEach(b=>b.onclick=()=>keepTop(()=>SC.pmode=b.dataset.pmode));
+  B.querySelectorAll("[data-pcol]").forEach(b=>b.onclick=()=>keepTop(()=>{ const k=b.dataset.pcol; SC.pcol.has(k)?SC.pcol.delete(k):SC.pcol.add(k); }));
   B.querySelectorAll("[data-yr]").forEach(b=>b.onclick=()=>{ const y=b.dataset.yr; ACT.has(y)?ACT.delete(y):ACT.add(y); renderScr(); });
   B.querySelectorAll("[data-act]").forEach(b=>b.onclick=()=>doAct(b.dataset.act,b));
   B.querySelectorAll("[data-tds]").forEach(b=>b.onclick=()=>{ const [fy,p2]=b.dataset.tds.split("|"); tdsUpload(+fy,p2); });
@@ -492,24 +504,48 @@ function holdBody(h){
     <div class="sortc">${[["value","Biggest"],["gain","Best return"],["name","A–Z"]].map(([k,l])=>`<button data-sort="${k}" aria-pressed="${by===k}">${l}</button>`).join("")}</div>
     <div class="grp">${H.map(holdRow).join("")}</div><p class="hint">Prices as of the Groww snapshot${snapD?" ("+fmtDs(snapD)+")":""} or your latest trade. New trades update this list.</p>`;
 }
-function actBody(T){
+function actBody(T,h){
   const L=T.slice().sort((a,b)=>(b.date||"")<(a.date||"")?-1:(b.date||"")>(a.date||"")?1:b.i-a.i);
   if(!L.length) return `<div class="empty">No entries yet.</div>`;
+  const intro=`<div class="intro">Every entry you've recorded${h==="Bonds"?" for bonds":h?" here":""}, newest first. Amounts without a sign are money you put in; <span class="gain">↩</span> is money that came back to you${h==="Bonds"?" (interest and principal repayments)":h==="Stocks"?" (sales, withdrawals)":""}.</div>`;
   const ys=[...new Set(L.map(t=>t.date?t.date.slice(0,4):"No date"))]; if(!ACT.size) ys.slice(0,1).forEach(y=>ACT.add(y));
-  return ys.map(y=>{ const R=L.filter(t=>(t.date?t.date.slice(0,4):"No date")===y), inn=SUM(R.filter(t=>t.amt>0),t=>t.amt), out=-SUM(R.filter(t=>t.amt<0),t=>t.amt), open=ACT.has(y);
-    return `<button class="gh" data-yr="${y}" style="width:100%"><span>${open?"▾":"▸"} ${y} · ${R.length}</span><b class="num">+${money(inn,true)}${out?` · <span class="loss">−${money(out,true)}</span>`:""}</b></button>${open?`<div class="grp">${R.map(txRow).join("")}</div>`:""}`; }).join("")
-    +`<p class="hint">Tap an entry for details</p>`;
+  return intro+ys.map(y=>{ const R=L.filter(t=>(t.date?t.date.slice(0,4):"No date")===y), inn=SUM(R.filter(t=>t.amt>0),t=>t.amt), out=-SUM(R.filter(t=>t.amt<0),t=>t.amt), open=ACT.has(y);
+    return `<button class="gh" data-yr="${y}" style="width:100%"><span>${open?"▾":"▸"} ${y} · ${R.length}</span><b class="num">Put in ${money(inn,true)}${out?` · <span class="gain">↩ ${money(out,true)} back</span>`:""}</b></button>${open?`<div class="grp">${R.map(txRow).join("")}</div>`:""}`; }).join("")
+    +`<p class="hint">Tap an entry to see, edit or delete it</p>`;
 }
 function bondsBody(){
-  const Bs=bondsFor(WHO), act=Bs.filter(b=>!b.closed).sort((x,y)=>(x.next?x.next.d:"9")<(y.next?y.next.d:"9")?-1:1), done=Bs.filter(b=>b.closed), due=dueItems(WHO);
+  const Bs=bondsFor(WHO), act=Bs.filter(b=>!b.closed).sort((x,y)=>(x.next?x.next.d:"9")<(y.next?y.next.d:"9")?-1:1), done=Bs.filter(b=>b.closed).sort((x,y)=>(y.mat||"")<(x.mat||"")?-1:1), due=dueItems(WHO);
+  const seg=SC.bseg==="repaid"&&done.length?"repaid":"active", L=seg==="active"?act:done;
   return (due.length?`<button class="banner" data-act="bell">${svgI("bell","var(--accent)")}<span><b>${due.length} repayment${due.length>1?"s":""} to confirm</b><small>${due.map(x=>esc(x.b.name)).join(", ")}</small></span><span class="go2">Check ›</span></button>`:"")
-    +`<div class="gh"><span>Active · ${act.length}</span><b class="num">${money(SUM(act,b=>b.cost),true)}</b></div><div class="grp">${act.map(bondRow).join("")||`<div class="empty">No active bonds.</div>`}</div>`
-    +(done.length?`<div class="gh"><span>Repaid · ${done.length}</span><b class="num">${money(SUM(done,b=>b.repaid),true)} back</b></div><div class="grp">${done.map(bondRow).join("")}</div>`:"");
+    +`<div class="pick2" role="group"><button data-bseg="active" aria-pressed="${seg==="active"}"><small>Active</small><b>${act.length}</b><i class="num">${money(SUM(act,b=>b.cost),true)} in</i></button>
+      <button data-bseg="repaid" aria-pressed="${seg==="repaid"}"${done.length?"":" disabled"}><small>Repaid</small><b>${done.length}</b><i class="num">${money(SUM(done,b=>b.repaid),true)} back</i></button></div>`
+    +`<div class="grp nlist">${L.map((b,k)=>bondRow(b).replace('<button class="brow"',`<button class="brow" style="--n:'${k+1}'"`)).join("")||`<div class="empty">${seg==="active"?"No active bonds.":"None repaid yet."}</div>`}</div>`;
 }
-function payoutList(){ const L=[]; bondsFor(WHO).forEach(b=>b.open.forEach(e=>L.push({b,e}))); L.sort((x,y)=>x.e.d<y.e.d?-1:1);
-  return `<div class="gh"><span>Coming back to you</span><b class="num">${money(SUM(L,x=>x.e.a),true)}</b></div><div class="grp">${L.map(({b,e},k)=>{ const due=e.d<=M.today;
-    return `<button class="hl" style="--k:${Math.min(k,12)}" ${due?`data-pr="${esc(b.key)}|${e.d}"`:`data-bond="${esc(b.key)}"`}><span class="av" style="background:${due?"var(--accent)":CLS.Bonds.col};color:#1a1000">${dOf(e.d).getDate()}</span><div style="min-width:0"><div class="n">${esc(b.name)}</div><div class="m">${fmtD(e.d)}${e.i?" · interest "+rs(e.i,true)+(e.est?" (est.)":""):""}${due?" · tap to confirm":""}</div></div><div class="r"><b class="num">${e.a?money(e.a,true):"—"}</b><small>${due?`<span class="tag due">Due</span>`:"expected"}</small></div></button>`; }).join("")||`<div class="empty">Nothing to come.</div>`}</div>`; }
-
+const fmtDy=s=>{ const d=dOf(s); return `${d.getDate()} ${MON[d.getMonth()]} ${String(d.getFullYear()).slice(2)}`; };
+function payRow({b,e},n,showName){ const due=e.d<=M.today;
+  return `<button class="prow" ${due?`data-pr="${esc(b.key)}|${e.d}"`:`data-bond="${esc(b.key)}"`}><span class="no num">${n}</span>
+    <div style="min-width:0"><div class="n">${esc(showName?b.name:(e.i&&e.a&&e.a-e.i>1?"Principal + interest":"Interest"))}</div><div class="m">${e.i?"interest "+money(e.i,true)+(e.est?" (est.)":""):""}${e.a&&e.i&&e.a-e.i>1?" · principal "+money(e.a-e.i,true):""}${showName?"":""}${due?" · tap to confirm":""}</div></div>
+    <div class="r"><b class="num">${e.a?money(e.a,false):"—"}</b><span class="dchip ${due?"due":""}">${fmtDy(e.d)}</span></div></button>`; }
+function payoutList(){ const Bs=bondsFor(WHO).filter(b=>b.open.length), L=[]; Bs.forEach(b=>b.open.forEach(e=>L.push({b,e}))); L.sort((x,y)=>x.e.d<y.e.d?-1:x.e.d>y.e.d?1:0);
+  const mode=SC.pmode==="bond"?"bond":"date", col=SC.pcol||(SC.pcol=new Set()), tog=(k,open)=>`<span class="fold" aria-hidden="true">${open?"▴":"▾"}</span>`;
+  let h=`<div class="gh"><span>Coming back to you · ${L.length}</span><b class="num">${money(SUM(L,x=>x.e.a),true)}</b></div>
+    <div class="pick2 sm" role="group"><button data-pmode="date" aria-pressed="${mode==="date"}">By date</button><button data-pmode="bond" aria-pressed="${mode==="bond"}">By bond</button></div>`;
+  if(!L.length) return h+`<div class="empty">Nothing to come.</div>`;
+  if(mode==="date"){ let n=0; const ys=[...new Set(L.map(x=>x.e.d.slice(0,4)))];
+    ys.forEach((y,yi)=>{ const Y=L.filter(x=>x.e.d.slice(0,4)===y), yk="y"+y, yOpen=SC.pcolInit?!col.has(yk):(yi===0||(col.add(yk),false));
+      h+=`<button class="fyh" data-pcol="${yk}"><span>${y}</span><small>${Y.length} · ${money(SUM(Y,x=>x.e.a),true)}</small>${tog(yk,yOpen)}</button>`;
+      const ms=[...new Set(Y.map(x=>x.e.d.slice(0,7)))];
+      if(!yOpen){ n+=Y.length; return; }
+      ms.forEach(m=>{ const Mx=Y.filter(x=>x.e.d.slice(0,7)===m), mk="m"+m, mOpen=!col.has(mk);
+        h+=`<button class="fmh" data-pcol="${mk}"><span>${MON[+m.slice(5)-1]} ${y}</span><small>${Mx.length} · ${money(SUM(Mx,x=>x.e.a),true)}</small>${tog(mk,mOpen)}</button>`;
+        if(mOpen) h+=`<div class="grp nlist">${Mx.map(x=>payRow(x,++n,true)).join("")}</div>`; else n+=Mx.length; }); });
+    SC.pcolInit=1; }
+  else { const B2=Bs.slice().sort((x,y)=>x.open[0].d<y.open[0].d?-1:1);
+    B2.forEach((b,bi)=>{ const bk="b"+b.key, open=SC.pcolInit2?!col.has(bk):(bi===0||(col.add(bk),false)), left=SUM(b.open,e=>e.a||0), paid=b.sched.length-b.open.length;
+      h+=`<button class="fyh bnd" data-pcol="${esc(bk)}"><span class="no num">${bi+1}</span><span>${esc(b.name)}<small class="sub2">${paid} of ${b.sched.length} paid · ${esc(whoVia(b.who,b.acct))}</small></span><small class="num">${money(left,true)}</small>${tog(bk,open)}</button>`;
+      if(open) h+=`<div class="grp nlist">${b.open.map((e,k)=>payRow({b,e},paid+k+1,false)).join("")}</div>`; });
+    SC.pcolInit2=1; }
+  return h; }
 /* ---------- charts ---------- */
 function unitHist(u){ const m=new Map(); (u.V||[]).forEach(v=>m.set(v.date,(m.get(v.date)||0)+v.amount)); return [...m.entries()].map(([d,v])=>({d,v})).sort((a,b)=>a.d<b.d?-1:1); }
 function series(U){

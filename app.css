@@ -504,9 +504,9 @@ main{padding:0 max(16px,env(safe-area-inset-left,0px));perspective:1200px}
 .fyrow .addr{color:var(--neon);font:600 13.5px var(--body);padding:4px 0}
 /* ---------- 3.3: one-screen home ---------- */
 html.homefit,html.homefit body{height:100%;overflow:hidden;overscroll-behavior:none}
-html.homefit .app{height:100dvh;min-height:0;display:flex;flex-direction:column;padding-bottom:calc(98px + env(safe-area-inset-bottom,0px));box-sizing:border-box}
+html.homefit .app{min-height:0;padding-bottom:0}
 html.homefit .top{flex:none}
-html.homefit #viewInv{flex:1;min-height:0;display:flex;flex-direction:column}
+html.homefit #viewInv{display:flex;flex-direction:column;overflow:hidden}
 html.homefit #viewInv>.whos,html.homefit #viewInv>.segv{flex:none}
 html.homefit .whos{margin:2px 0 4px}
 html.homefit .segv{margin:2px 0 4px}
@@ -536,3 +536,35 @@ html.homefit .lg{padding:8px 8px 7px}
 .tx .m .num{color:var(--muted)}
 .banks .bmore{border-style:dashed;color:var(--neon)}
 .tabs3 button{font-size:12px}
+
+/* 3.4 bonds: active / repaid picker, numbered rows, payouts by date or bond */
+.pick2{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:12px 0 10px}
+.pick2 button{display:grid;gap:2px;justify-items:start;padding:12px 14px;border-radius:16px;background:var(--surface);border:1px solid var(--line);text-align:left;transition:border-color .25s,background .25s}
+.pick2 button small{font:600 10.5px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.pick2 button b{font:600 22px var(--mono);letter-spacing:-.03em}
+.pick2 button i{font:500 11.5px var(--mono);font-style:normal;color:var(--muted)}
+.pick2 button[aria-pressed="true"]{border-color:var(--c,var(--neon));background:color-mix(in srgb,var(--c,var(--neon)) 14%,var(--surface));box-shadow:0 0 22px -10px var(--c,var(--neon))}
+.pick2 button[aria-pressed="true"] small{color:var(--c,var(--neon))}
+.pick2 button:disabled{opacity:.45}
+.pick2.sm button{padding:9px 12px;justify-items:center;font:600 13px var(--body);color:var(--muted)}
+.pick2.sm button[aria-pressed="true"]{color:var(--ink)}
+.nlist .brow{position:relative;padding-left:52px}
+.nlist .brow::before{content:var(--n);position:absolute;left:12px;top:13px;width:28px;height:28px;border-radius:9px;display:grid;place-items:center;font:700 12px var(--mono);color:var(--c,var(--neon));background:color-mix(in srgb,var(--c,var(--neon)) 14%,transparent);border:1px solid color-mix(in srgb,var(--c,var(--neon)) 40%,transparent)}
+.no{flex:none;width:28px;height:28px;border-radius:9px;display:grid;place-items:center;font:700 12px var(--mono);color:var(--c,var(--neon));background:color-mix(in srgb,var(--c,var(--neon)) 14%,transparent);border:1px solid color-mix(in srgb,var(--c,var(--neon)) 40%,transparent)}
+.prow{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:12px;align-items:center;width:100%;padding:11px 14px;text-align:left;border-bottom:1px solid var(--line)}
+.prow .n{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.prow .m{font-size:12px;color:var(--muted);margin-top:2px}
+.prow .r{display:grid;justify-items:end;gap:4px}
+.prow .r b{font:600 14px var(--mono)}
+.dchip{font:600 10.5px var(--mono);padding:2px 7px;border-radius:7px;background:var(--chip);color:var(--muted);white-space:nowrap}
+.dchip.due{background:color-mix(in srgb,var(--accent) 20%,transparent);color:var(--accent)}
+.fyh,.fmh{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:12px 4px 8px}
+.fyh>span:not(.no):not(.fold){flex:1;min-width:0;font:600 15px var(--mono);letter-spacing:.02em}
+.fmh>span:not(.fold){flex:1;font:600 11px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--muted);padding-left:6px}
+.fyh small,.fmh small{font:500 11.5px var(--mono);color:var(--muted)}
+.fyh.bnd{padding:12px 6px;border-radius:14px;background:var(--surface);border:1px solid var(--line);margin-top:8px}
+.fyh.bnd>span:not(.no):not(.fold){font:600 14px var(--body);letter-spacing:0}
+.fyh .sub2{display:block;font:500 11.5px var(--body);color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fold{flex:none;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-size:11px;color:var(--ink);background:color-mix(in srgb,var(--ink) 8%,transparent);border:1px solid color-mix(in srgb,var(--ink) 12%,transparent);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);opacity:.75}
+.intro{font-size:12.5px;color:var(--muted);line-height:1.5;padding:12px 4px 2px}
+.brow .m>span:first-child{min-width:0}.brow .m>span:last-child{flex:none;white-space:nowrap;text-align:right}
