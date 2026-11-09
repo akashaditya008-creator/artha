@@ -568,3 +568,16 @@ html.homefit .lg{padding:8px 8px 7px}
 .fold{flex:none;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-size:11px;color:var(--ink);background:color-mix(in srgb,var(--ink) 8%,transparent);border:1px solid color-mix(in srgb,var(--ink) 12%,transparent);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);opacity:.75}
 .intro{font-size:12.5px;color:var(--muted);line-height:1.5;padding:12px 4px 2px}
 .brow .m>span:first-child{min-width:0}.brow .m>span:last-child{flex:none;white-space:nowrap;text-align:right}
+
+/* 3.7: ring figures sit on their slice (dark chip, white text); tiles carry their category colour */
+.rlab{gap:0;padding:3px 7px 4px;border-radius:9px;background:rgba(4,8,14,.74);border:1px solid rgba(255,255,255,.14);box-shadow:0 4px 12px -4px rgba(0,0,0,.7)}
+.rlab b{font:700 12.5px var(--mono);color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.6)}
+.rlab i{font:600 10px var(--mono);color:rgba(255,255,255,.78)}
+.rlab.dim{opacity:.35}
+.rlab.on{background:rgba(4,8,14,.82);border-color:#fff;box-shadow:0 6px 18px -6px rgba(0,0,0,.8)}
+.rlab.on::after{color:#fff;font-size:9px;margin-top:1px}
+.lg{background:color-mix(in srgb,var(--c) 15%,var(--surface));border-color:color-mix(in srgb,var(--c) 45%,transparent)}
+.lg::before{width:4px}
+.lg small{color:var(--c)}
+.lg b{color:var(--ink)}
+.lg[aria-pressed="true"]{background:color-mix(in srgb,var(--c) 30%,var(--surface));border-color:var(--c);box-shadow:0 0 0 1px var(--c),0 8px 22px -8px var(--c)}

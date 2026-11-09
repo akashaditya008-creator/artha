@@ -181,7 +181,7 @@ S.ring=function(host,segs,cb){
   /* labels: one per slice, always rewritten so the figure follows invested / value / profit */
   const seen=new Set();
   segs.forEach(s=>{ seen.add(s.c); let el=RG.labs.get(s.c); if(!el){ el=document.createElement("button"); el.type="button"; el.className="rlab"; el.dataset.c=s.c; RG.lab.appendChild(el); RG.labs.set(s.c,el); }
-    el.style.setProperty("--c",s.col); el.innerHTML=`<small>${s.name}</small><b class="num">${s.val}</b>${s.share?`<i>${s.share}</i>`:""}`; el.setAttribute("aria-label",`${s.name}, open`); });
+    el.style.setProperty("--c",s.col); el.innerHTML=`<b class="num">${s.val}</b>${s.share?`<i>${s.share}</i>`:""}`; el.setAttribute("aria-label",`${s.name}, open`); });
   [...RG.labs.keys()].forEach(k=>{ if(!seen.has(k)){ RG.labs.get(k).remove(); RG.labs.delete(k); } });
   if(key===RG.key) return true;
   RG.key=key; RG.meshes.forEach(m=>{ RG.spin.remove(m); m.geometry.dispose(); m.material.dispose(); }); RG.meshes=[];
@@ -202,8 +202,8 @@ function setPop(c,user){ if(!RG) return; RG.pop=c||null; RG.labs.forEach((el,k)=
 S.ringFocus=c=>{ if(RG&&RG.pop!==(c||null)) setPop(c||null,false); };
 const _v=webgl?new T.Vector3():null;
 function placeLabels(){ if(!RG||!RG.labs.size) return; const W=RG.W, H=RG.H, half=W/2;
-  RG.meshes.forEach(m=>{ const el=RG.labs.get(m.userData.c); if(!el) return; const u=m.userData, rr=RO+.42+.5*u.f;
-    _v.set(Math.cos(u.mid)*rr,Math.sin(u.mid)*rr,u.depth*.5+.28*u.f); m.parent.localToWorld(_v); _v.project(RG.cam);
+  RG.meshes.forEach(m=>{ const el=RG.labs.get(m.userData.c); if(!el) return; const u=m.userData, rr=(RI+RO)/2+.42*u.f; /* sits on the slice's top face, middle of the band */
+    _v.set(Math.cos(u.mid)*rr,Math.sin(u.mid)*rr,u.depth*(1+.35*u.f)+.28*u.f+.06); m.parent.localToWorld(_v); _v.project(RG.cam);
     let x=(_v.x+1)/2*W, y=(1-_v.y)/2*H; /* scale lives in the transform (a CSS "scale" would also scale the translate and push the label past the ring) */
     const k=1+.22*u.f, w=(el.offsetWidth||80)*k, hh=(el.offsetHeight||50)*k; x=Math.max(w/2+2,Math.min(W-w/2-2,x)); y=Math.max(hh/2+2,Math.min(H-hh/2-4,y));
     el.style.transform=`translate(${x.toFixed(1)}px,${y.toFixed(1)}px) translate(-50%,-50%) scale(${k.toFixed(3)})`; el.style.zIndex=String(Math.round(100-_v.z*50)); });

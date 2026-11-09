@@ -1,7 +1,7 @@
-/* Artha 3.6 — investments + insurance. Data lives in the "Artha – My Investments" Google Sheet via the Apps Script API. */
+/* Artha 3.7 — investments + insurance. Data lives in the "Artha – My Investments" Google Sheet via the Apps Script API. */
 (()=>{
 "use strict";
-const APP_VERSION="3.6";
+const APP_VERSION="3.7";
 const PROJECT_URL="https://claude.ai/project/01a1965d-e312-704a-8114-16f0090c8706";
 const $=id=>document.getElementById(id);
 const store={get(k,d){try{const v=localStorage.getItem("artha:"+k);return v==null?d:JSON.parse(v);}catch(e){return d;}},set(k,v){try{localStorage.setItem("artha:"+k,JSON.stringify(v));}catch(e){}}};
@@ -308,7 +308,7 @@ function setScope(s){ if(s===SCOPE&&s!=="all"){ openScr(s); return; } SCOPE=s; p
 function ringPop(c){ SCOPE=c||"all"; paintHero(); drawTiles(); }
 function ringFocus(){ if(S3.ringFocus) S3.ringFocus(SCOPE==="all"?null:SCOPE); document.querySelectorAll("#stage svg.flat [data-c]").forEach(n=>n.style.opacity=SCOPE==="all"||n.dataset.c===SCOPE?1:.22); }
 function drawTiles(){ const T=totals(), keys=["all"].concat(T.G.map(g=>g.h)), cols=`repeat(${keys.length},minmax(0,1fr))`, base=FACE===0?T.put:T.cur;
-  const colOf=k=>k==="all"?"var(--neon)":CLS[k].col;
+  const colOf=k=>k==="all"?"#C9D3E0":CLS[k].col; /* Overall: neutral silver, so no slice shares its colour */
   $("scope").style.gridTemplateColumns=cols; $("legend").style.gridTemplateColumns=cols;
   $("scope").innerHTML=keys.map(k=>`<button data-s="${k}" aria-pressed="${SCOPE===k}" style="--c:${colOf(k)}" aria-label="${SCOPEL[k]}"></button>`).join("");
   const P=pct100(keys.slice(1).map(k=>{ const f=figOf(T,k); return FACE===0?f.put:f.cur; }));
