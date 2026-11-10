@@ -85,6 +85,7 @@ def main():
         def look(name):
             pg.wait_for_timeout(700)
             sp = pg.evaluate(SPILL); bad = list(errs); errs.clear()
+            if pg.evaluate("/\\[object Object\\]|undefined|NaN/.test(document.body.innerText)"): sp = sp + ['raw value on screen ([object Object] / undefined / NaN)']
             for e in bad: FAIL.append(f"{name}: JavaScript error: {e[:160]}")
             for s in sp: FAIL.append(f"{name}: {s}")
             print(("FAIL " if bad or sp else "PASS ") + name + ("" if not (bad or sp) else " — " + "; ".join([x[:120] for x in bad] + sp)))

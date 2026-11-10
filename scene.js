@@ -71,7 +71,7 @@ S.ring=function(host,segs,cb){
     /* the ring stays where the user leaves it; this button brings back the default angle and the slow drift */
     const rst=document.createElement("button"); rst.type="button"; rst.className="rreset"; rst.hidden=true; rst.setAttribute("aria-label","Reset ring view");
     rst.innerHTML='<svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.4-5.7M4 4v4.5h4.5"/></svg>'; host.appendChild(rst);
-    const r=new T.WebGLRenderer({canvas:c,antialias:true,alpha:true}); r.setPixelRatio(Math.min(2,devicePixelRatio||1));
+    const r=new T.WebGLRenderer({canvas:c,antialias:true,alpha:true,preserveDrawingBuffer:true});   // the picture is kept between draws (the ring is only redrawn when it moves) r.setPixelRatio(Math.min(2,devicePixelRatio||1));
     const scene=new T.Scene(), cam=new T.PerspectiveCamera(36,1,.1,50); cam.position.set(0,-.2,8.4);
     scene.add(new T.AmbientLight(0xffffff,.55));
     const k=new T.PointLight(0xffffff,1.1,40); k.position.set(3,4,6); scene.add(k);
@@ -84,7 +84,7 @@ S.ring=function(host,segs,cb){
     og.setAttribute("position",new T.BufferAttribute(op,3)); const orbit=new T.Points(og,new T.PointsMaterial({color:0x3CF0D4,size:.06,transparent:true,opacity:.8,blending:T.AdditiveBlending})); root.add(orbit); halo.visible=halo2.visible=orbit.visible=false;   // the thin outline circles around and inside the ring are gone
     RG={host,c,lab,rst,r,scene,cam,root,spin,halo,halo2,orbit,meshes:[],labs:new Map(),key:"",dead:false,cb:cb||{},
       th:0,w:.12,ph:TILT0,pv:0,rest:TILT0,user:false,yaw:0,drag:null,pop:null,zoom:0,t0:0,W:320,H:236};
-    const size=()=>{ const w=host.clientWidth||320, hh=host.clientHeight, h=hh>120?hh:Math.round(w*.8); RG.W=w; RG.H=h; r.setSize(w,h,false); c.style.width=w+"px"; c.style.height=h+"px"; cam.aspect=w/h; cam.updateProjectionMatrix(); RG.dist=Math.max(8.4,3.15/(Math.tan(18*Math.PI/180)*cam.aspect)); };
+    const size=()=>{ if(RG) RG.sig=""; const w=host.clientWidth||320, hh=host.clientHeight, h=hh>120?hh:Math.round(w*.8); RG.W=w; RG.H=h; r.setSize(w,h,false); c.style.width=w+"px"; c.style.height=h+"px"; cam.aspect=w/h; cam.updateProjectionMatrix(); RG.dist=Math.max(8.4,3.15/(Math.tan(18*Math.PI/180)*cam.aspect)); };
     size(); new ResizeObserver(size).observe(host);
     const ray=new T.Raycaster(), v2=new T.Vector2();
     const pick=e=>{ const b=c.getBoundingClientRect(); v2.set((e.clientX-b.left)/b.width*2-1,-(e.clientY-b.top)/b.height*2+1); ray.setFromCamera(v2,cam); const h=ray.intersectObjects(RG.meshes); return h[0]&&h[0].object; };
@@ -141,8 +141,8 @@ S.ring=function(host,segs,cb){
         m.scale.set(s,s,Math.max(.001,e)*(1+.35*u.f)); m.position.set(Math.cos(u.mid)*out,Math.sin(u.mid)*out,.28*u.f);
         m.material.opacity=u.o; m.material.emissiveIntensity=.3+.45*u.f; });
       /* draw only when the ring has moved (it rests when untouched, so an idle screen costs nothing) */
-      const sig=RG.th.toFixed(3)+"|"+RG.root.rotation.x.toFixed(2)+"|"+RG.root.rotation.y.toFixed(2)+"|"+z.toFixed(3)+"|"+RG.meshes.map(m=>m.userData.f.toFixed(2)+m.userData.o.toFixed(2)+m.scale.z.toFixed(2)).join("")+"|"+c.clientWidth;
-      if(sig===RG.sig&&now-(RG.lr||0)<1500) return; RG.sig=sig; RG.lr=now;
+      const sig=RG.th.toFixed(3)+"|"+RG.root.rotation.x.toFixed(2)+"|"+RG.root.rotation.y.toFixed(2)+"|"+z.toFixed(3)+"|"+RG.meshes.map(m=>m.userData.f.toFixed(2)+m.userData.o.toFixed(2)+m.scale.z.toFixed(2)).join("")+"|"+c.clientWidth+"x"+c.clientHeight;
+      if(sig===RG.sig&&now-(RG.lr||0)<700) return; RG.sig=sig; RG.lr=now;
       RG.r.render(RG.scene,RG.cam);
       placeLabels(); };
     requestAnimationFrame(loop);

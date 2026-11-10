@@ -1,7 +1,7 @@
 /* Artha 3.9 — investments + insurance. Data lives in the "Artha – My Investments" Google Sheet via the Apps Script API. */
 (()=>{
 "use strict";
-const APP_VERSION="3.13.2";
+const APP_VERSION="3.13.3";
 /* Personal details (banks, platforms, the Claude project link) come from the backend after sign-in, so this public code holds none. */
 const CFG=()=>(typeof DATA!=="undefined"&&DATA&&DATA.cfg)||{};
 const PROJECT_URL=()=>{ const u=safeUrl(CFG().project); return u==="#"?"https://claude.ai/projects":u; };
@@ -433,6 +433,7 @@ function txTitle(t){ if(t.type==="Premium") return "Term premium";
 const txNeg=t=>OUTT.has(t.type)||t.type==="Moved"||(t.type==="F&O result"&&t.show<0);
 const BACKT=new Set(["Withdraw","Sell","Redeem","Payout"]);
 function txRow(t,k,no){ const neg=txNeg(t), v=Math.abs(t.show), back=BACKT.has(t.type);
+  no=typeof no==="number"||typeof no==="string"?no:"";   // (as a .map callback the third argument is the whole list, not a serial number)
   return `<button class="tx" data-tx="${t.i}" style="--k:${Math.min(k||0,12)}"><span class="n">${no?`<i class="sn num">${no}</i>`:""}${esc(txTitle(t))}</span><span class="amt num ${t.ca?"":back?"gain":neg?"loss":""}">${t.ca?(t.qty?(t.type==="CA in"?"+":"−")+qtyf(t.qty)+" sh · ":"")+"cost "+money(v,true):t.type==="Bonus"?"+"+qtyf(t.qty):(back?"↩ ":neg?"−":"")+money(v)}</span>
     <span class="m"><span>${[fmtDs(t.date),t.acct?whoVia(t.who,t.acct):t.who,t.trade?qtyf(t.trade.qty)+" @ "+rsx(t.trade.price):""].filter(Boolean).map(esc).join(" · ")}</span>${t.pending?`<span class="chip sync">Syncing…</span>`:""}</span></button>`; }
 function bindRows(el){
@@ -1794,12 +1795,14 @@ function refresh(){ if(!PAINTED||document.documentElement.classList.contains("lo
   const SEL="button,a,[role=button],.tile,.pcard,.hl,.dt,.dn,.vcard,label.adate";
   addEventListener("pointerdown",e=>{ if(calm()||document.documentElement.classList.contains("locked")) return; const el=e.target.closest&&e.target.closest(SEL); if(!el||el.disabled) return;
     rip.style.left=e.clientX+"px"; rip.style.top=e.clientY+"px"; rip.classList.remove("go"); void rip.offsetWidth; rip.classList.add("go");
-    if(el.closest("#stage")||getComputedStyle(el).transform!=="none") return;   // already placed by a transform: leave its position alone
+    /* rows inside rounded lists and anything already placed by a transform are not tilted: moving them makes the phone redraw the whole list twice */
+    if(el.closest("#stage,.list,.grp,.esheet,.faces")||getComputedStyle(el).transform!=="none") return;
     const r=el.getBoundingClientRect(); el.style.setProperty("--tx",(((e.clientX-r.left)/Math.max(1,r.width)-.5)*2).toFixed(2)); el.style.setProperty("--ty",(((e.clientY-r.top)/Math.max(1,r.height)-.5)*2).toFixed(2));
     el.style.setProperty("--tk",r.width>220?"3":r.width>110?"7":"12");
     clearTimeout(t); if(cur&&cur!==el) cur.classList.remove("tapd"); cur=el; el.classList.add("tapd"); },{passive:true});
   const up=()=>{ const el=cur; cur=null; if(el) t=setTimeout(()=>el.classList.remove("tapd"),150); };
-  addEventListener("pointerup",up,{passive:true}); addEventListener("pointercancel",up,{passive:true}); })();
+  addEventListener("pointerup",up,{passive:true}); addEventListener("pointercancel",up,{passive:true});
+  addEventListener("click",()=>{ clearTimeout(t); document.querySelectorAll(".tapd").forEach(n=>n.classList.remove("tapd")); cur=null; },true); })();
 $("verTxt").textContent="Version "+APP_VERSION;
 /* update card: never pops over an open screen or entry; waits until you're back on Home */
 let UPD=null, updT=0;
