@@ -33,7 +33,7 @@
 <link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icon-192.png"><link rel="apple-touch-icon" href="icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Sora:wght@400;600;700&display=swap">
-<link rel="stylesheet" href="app.css?v=3.12.1">
+<link rel="stylesheet" href="app.css?v=3.13.0">
 </head>
 <body>
 <canvas id="bg3d" aria-hidden="true"></canvas>
@@ -81,6 +81,7 @@
 <div class="scrim" id="scrim" hidden></div>
 <aside class="drawer" id="drawer" hidden aria-label="Menu">
   <div class="dhead"><div><h2>Artha</h2><small id="verTxt"></small></div><button class="done" id="drawerDone" type="button">Close</button></div>
+  <div class="dnow" id="dNow"></div>
   <div class="dgrid">
     <button class="dt" type="button" id="dVals" style="--c:#3CF0D4"><span class="di"><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16zM14 6l4 4"/></svg></span><b>Update values</b><small>What it's worth today</small></button>
     <button class="dt" type="button" id="dNps" style="--c:#FF8A3D"><span class="di"><svg viewBox="0 0 24 24"><path d="M3 18h18M7 18a5 5 0 0 1 10 0M12 8V5M5.6 11.6 3.8 9.8M18.4 11.6l1.8-1.8"/></svg></span><b>NPS</b><small id="dNpsS"></small></button>
@@ -157,6 +158,6 @@
   <button type="button" id="lockBtn">Unlock</button><button type="button" class="alt" id="lockAlt">Use Google sign-in instead</button><div class="err" id="lockErr" role="alert"></div></div></div>
 <div class="toast" id="toast" role="status" hidden></div>
 <input type="file" id="fileIn" hidden multiple>
-<script src="app.js?v=3.12.1" defer></script>
+<script src="app.js?v=3.13.0" defer></script>
 </body>
 </html>

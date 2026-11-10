@@ -614,3 +614,39 @@ html.locked .app,.locked .scr,.locked .sheet,.locked .add,.locked .esheet,.locke
 #eBox .seg.sm{margin:10px 0 0}#eBox .tlist,#eBox .list{max-height:none;margin-top:12px}
 
 .picks{margin-top:8px}.picks button{min-width:0;white-space:normal;text-align:left;line-height:1.3}.picks button[hidden]{display:none}
+
+/* ================= 3.13: one motion system. Every tap answers, screens move in depth, a save is celebrated ================= */
+.tapd{transform:perspective(520px) rotateX(calc(var(--ty,0)*var(--tk,8)*-1deg)) rotateY(calc(var(--tx,0)*var(--tk,8)*1deg)) scale(.962)!important;transition:transform .09s var(--ease),filter .09s!important;filter:brightness(1.2)}
+.rip{position:fixed;left:-99px;top:-99px;width:14px;height:14px;margin:-7px 0 0 -7px;border-radius:50%;border:2px solid var(--neon);opacity:0;pointer-events:none;z-index:70}
+.rip.go{animation:rip .55s var(--ease)}
+@keyframes rip{from{opacity:.75;transform:scale(1)}to{opacity:0;transform:scale(9)}}
+:root:not(.calm) .scr:not(.bye){animation:scrIn3 .5s var(--ease)}
+@keyframes scrIn3{from{opacity:0;transform:perspective(1100px) rotateY(-16deg) translateX(14%) scale(.94)}}
+:root:not(.calm) .scr.bye{animation:scrOut3 .22s var(--ease) forwards}
+@keyframes scrOut3{to{opacity:0;transform:perspective(1100px) rotateY(12deg) translateX(10%) scale(.96)}}
+:root:not(.calm) .esheet:not(.bye) .box{animation:sheetUp3 .42s var(--ease)}
+@keyframes sheetUp3{from{transform:perspective(900px) translateY(46%) rotateX(16deg);opacity:.2}}
+:root:not(.calm) .add:not(.bye){animation:addIn3 .45s var(--ease)}
+@keyframes addIn3{from{opacity:0;transform:perspective(1100px) translateY(8%) rotateX(-10deg) scale(.95)}}
+:root:not(.calm) .drawer:not(.bye){animation:drawerIn3 .42s var(--ease)}
+@keyframes drawerIn3{from{opacity:.4;transform:perspective(900px) translateX(-100%) rotateY(26deg)}}
+:root.calm .rip,:root.calm .coin{display:none}
+@media (prefers-reduced-motion:reduce){.rip,.coin{display:none}.tapd{transform:none!important}}
+#stage.swell{animation:swell .95s var(--spring)}
+@keyframes swell{0%{transform:scale(1)}32%{transform:scale(1.08)}100%{transform:scale(1)}}
+.coin{position:fixed;z-index:62;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:var(--neon);color:#03100e;font:700 17px var(--mono);box-shadow:0 0 26px var(--neon);pointer-events:none}
+.yay.big{top:auto;bottom:calc(112px + env(safe-area-inset-bottom,0px));transform:translate(-50%,0);min-width:min(300px,86vw);animation:yayUp .5s var(--spring) both}
+.yay.big.bye{animation:yayDown .35s var(--ease) forwards}
+@keyframes yayUp{from{opacity:0;transform:translate(-50%,40px) scale(.9)}}
+@keyframes yayDown{to{opacity:0;transform:translate(-50%,24px) scale(.95)}}
+.yay .yamt{font:600 34px var(--mono);color:var(--neon);letter-spacing:-.02em}
+.yay .ytot{color:var(--ink)}.yay .ytot .num{font-family:var(--mono);font-weight:600}
+.yay .ymile{padding:7px 13px;border-radius:999px;border:1px solid var(--neon);font:600 12.5px var(--body);color:var(--ink);background:color-mix(in srgb,var(--neon) 14%,transparent)}
+.yay.quiet{border-color:var(--line);box-shadow:0 20px 50px -20px #000}
+.yay.quiet .tick{background:var(--muted);box-shadow:none;width:44px;height:44px}
+/* menu: what matters today, before the tools */
+.dnow{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:14px 0 12px}
+.dnow:empty{display:none}
+.dn{display:block;text-align:left;padding:11px 10px;border-radius:16px;background:var(--surface);border:1px solid var(--line);box-shadow:inset 0 2px 0 var(--c);min-width:0;color:var(--ink)}
+.dn b{display:block;font:600 15px var(--body);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dn small{display:block;margin-top:3px;font-size:10.5px;line-height:1.25;color:var(--muted)}

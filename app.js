@@ -1,7 +1,7 @@
 /* Artha 3.9 — investments + insurance. Data lives in the "Artha – My Investments" Google Sheet via the Apps Script API. */
 (()=>{
 "use strict";
-const APP_VERSION="3.12.1";
+const APP_VERSION="3.13.0";
 /* Personal details (banks, platforms, the Claude project link) come from the backend after sign-in, so this public code holds none. */
 const CFG=()=>(typeof DATA!=="undefined"&&DATA&&DATA.cfg)||{};
 const PROJECT_URL=()=>{ const u=safeUrl(CFG().project); return u==="#"?"https://claude.ai/projects":u; };
@@ -14,7 +14,7 @@ const SUM=(a,f)=>a.reduce((s,x)=>s+(f?f(x):x),0);
 const splitPr=v=>{ const i=v.lastIndexOf("|"); return [v.slice(0,i),v.slice(i+1)]; };
 const rid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 /* 3D layer: three.js (600 KB) is loaded after the app itself has started, so it never delays the lock screen; until then a stub answers */
-let S3={ok:false,stub:true,theme(){},scroll(){},initBg(){},ring(){return false;},ringColor(){},ringFocus(){},setCalm(){}};
+let S3={ok:false,stub:true,theme(){},scroll(){},initBg(){},ring(){return false;},ringColor(){},ringFocus(){},setCalm(){},pulse(){}};
 let ready3D=null;
 function load3D(){ if(ready3D) return ready3D; const one=(src,sri)=>new Promise(res=>{ const s=document.createElement("script"); s.src=src; if(sri) s.integrity=sri; s.onload=()=>res(true); s.onerror=()=>res(false); document.head.appendChild(s); });
   const sri=(document.querySelector('meta[name="three-sri"]')||{}).content||"";
@@ -24,7 +24,10 @@ const soon3D=ms=>Promise.race([load3D(),new Promise(r=>setTimeout(r,ms))]);
 /* ---------- endpoint (only from the private setup link) ---------- */
 function takeLink(s){ const m=/[#&?]k=([\w-]{20,})/.exec(s||"")||/\/macros\/s\/([\w-]{20,})\//.exec(s||""); if(!m) return false; store.set("api","https://script.google.com/macros/s/"+m[1]+"/exec"); return true; }
 if(takeLink(location.hash)) history.replaceState(null,"",location.pathname+location.search);
-const API=()=>store.get("api",""), PW=()=>store.get("tok","");
+/* The backend address is built in, so a new phone needs no setup link: open Artha, sign in with Google, and the backend lets in
+   only the allowed accounts. (A setup link still works and wins, for another family or a moved backend.) */
+const HOME_API="https://script.google.com/macros/s/AKfycbyQ6Nj8b9icyxlT_Pk-dbPr9RnEJOPo4ZTDoDY9Z1WHbBxypIlq3sG8svOdq5w1WrA/exec";
+const API=()=>store.get("api","")||HOME_API, PW=()=>store.get("tok","");
 try{ localStorage.removeItem("artha:pass"); }catch(e){} // the old family passcode is no longer used
 function call(action,extra){
   return fetch(API(),{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(Object.assign({action,pass:PW()},extra||{}))})
@@ -1421,15 +1424,49 @@ function saveEntry(){ const d=A.det, type=A.type, T=typeOf(type), inv=A.mode==="
     recOp={id:"oth:"+acct+"|"+name,kind:"oth",title:name,data:{acct,who:A.who,name,ret:d.ret,rate:d.ret==="rate"?numIn(d.rate):0,comp:d.comp,till:d.till,end:d.till==="date"?d.end:""}};
     return commit(rows,a,recOp,[],type,acct,{t:"Saved",s:`${name} · ${rs(a,false)}`}); }
   commit(rows,amt,recOp,cal,type,acct); }
+const ADDED={stocks:"Stocks",us:"US Stocks",mf:"Mutual Funds",bond:"Bonds",fd:"Fixed Deposits",cash:"your balance",nps:"NPS",other:"Other investments"};
+const lakhs=n=>n>=100?(n/100).toFixed(n%100?2:0).replace(/\.?0+$/,"")+" crore":n+" lakh";
+/* one line of encouragement when there is something real to say: a lakh crossed, a fund bought month after month, a busy month */
+function milestone(rows,t0,t1){ try{
+  if(t0!=null&&t1!=null&&t1>t0&&Math.floor(t1/1e5)>Math.floor(t0/1e5)) return "Crossed ₹"+lakhs(Math.floor(t1/1e5))+" put in";
+  const r=rows.find(x=>x.type==="Buy"); if(!r) return "";
+  const led=(DATA&&DATA.led)||[], mo=d=>String(d||"").slice(0,7), prev=m=>{ const y=+m.slice(0,4), k=+m.slice(5,7); return k===1?(y-1)+"-12":y+"-"+pad2(k-1); };
+  if(r.asset==="Mutual Funds"&&r.name){ const has=new Set(led.filter(x=>x[4]==="Mutual Funds"&&x[5]==="Buy"&&x[6]===r.name).map(x=>mo(x[1]))); let m=mo(r.date), n=1; while(has.has(m=prev(m))) n++;
+    if(n>=2) return "Month "+n+" in a row for this fund"; }
+  const n=led.filter(x=>x[5]==="Buy"&&mo(x[1])===mo(r.date)&&x[12]!=="nps").length+rows.filter(x=>x.type==="Buy").length;
+  return n>=2?["","","2nd","3rd"][n]||n+"th":""; }catch(e){ return ""; } }
 function commit(rows,amt,recOp,cal,type,acct,yay){
+  const out=A.mode==="out", t0=M?totals("all").put:null;
   if(recOp) OUT.push({kind:"rec",ops:[recOp],rid:rid()}); if(cal.length) queueCal(cal);
   store.set("acct:"+type,acct);
-  OUT.push({kind:"add",rows,rid:rid()}); saveOut(); ov.back(); refresh(); celebrate(yay?yay.t:"Saved",yay?yay.s:rs(amt,false)+" recorded"); flush(); }
+  OUT.push({kind:"add",rows,rid:rid()}); saveOut(); ov.back(); refresh();
+  const t1=M?totals("all").put:null, grew=t0!=null&&t1!=null&&t1>t0+.5; let mile=out?"":milestone(rows,t0,grew?t1:null); if(/^\d+(nd|rd|th)$/.test(mile)) mile+=" investment this month";
+  const title=yay?yay.t:out?"Recorded":type==="term"?"Premium recorded":"Added to "+(ADDED[type]||"Artha");
+  celebrate(title,yay?yay.s:(out?rs(amt,false)+" taken out":"Saved to your sheet"),{amt:out||type==="term"?0:amt,out,t0:grew?t0:null,t1:grew?t1:null,mile}); flush(); }
 /* a small win: tick + confetti burst on every saved entry */
 const CHEERS=["Nicely done.","Every rupee counted.","Your future self says thanks.","Building, one entry at a time.","That's tracked.","Steady wins."];
-function celebrate(title,sub){ if(navigator.vibrate) navigator.vibrate([10,40,18]);
-  const y=document.createElement("div"); y.className="yay"; y.innerHTML=`<span class="tick"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><b>${esc(title)}</b><small>${esc(sub)}</small><small style="color:var(--neon)">${esc(CHEERS[Math.floor(Math.random()*CHEERS.length)])}</small>`;
-  document.body.appendChild(y); setTimeout(()=>{ y.classList.add("bye"); setTimeout(()=>y.remove(),400); },1900);
+/* numbers roll up to their new value */
+function countUp(el,a,b,ms,fmt){ if(!el) return; if(calm()){ el.textContent=fmt(b); return; } const t0=performance.now();
+  const step=now=>{ const k=Math.min(1,(now-t0)/ms), e=1-Math.pow(1-k,3); el.textContent=fmt(a+(b-a)*e); if(k<1&&el.isConnected) requestAnimationFrame(step); }; requestAnimationFrame(step); }
+/* the new money flies from the + button into the ring */
+function flyCoin(){ const f=$("addBtn"), st=$("stage"); if(!f||!f.animate) return; const a=f.getBoundingClientRect(), s=st&&st.offsetHeight&&!isOpen($("scr"))?st.getBoundingClientRect():null;
+  const x0=a.left+a.width/2, y0=a.top+a.height/2, x1=s?s.left+s.width/2:innerWidth/2, y1=s?s.top+s.height*.52:innerHeight*.32;
+  [0,90,180].forEach((d,i)=>{ const c=document.createElement("i"); c.className="coin"; c.textContent="₹"; c.setAttribute("aria-hidden","true"); c.style.left=x0+"px"; c.style.top=y0+"px"; document.body.appendChild(c);
+    const mx=(x1-x0)*.5+(i-1)*46, my=(y1-y0)-70-i*18;
+    c.animate([{transform:"translate(-50%,-50%) scale(.6)",opacity:0},{transform:"translate(-50%,-50%) scale(1.1)",opacity:1,offset:.12},{transform:`translate(calc(-50% + ${mx}px),calc(-50% + ${my}px)) scale(1.2) rotateY(360deg)`,opacity:1,offset:.6},{transform:`translate(calc(-50% + ${x1-x0}px),calc(-50% + ${y1-y0}px)) scale(.25) rotateY(720deg)`,opacity:0}],{duration:950,delay:d,easing:"cubic-bezier(.3,.7,.3,1)",fill:"both"}).onfinish=()=>c.remove(); }); }
+/* after a save: a tick, the amount rolling up, what it was added to, the new total and (when earned) a milestone.
+   It never blocks: touches pass straight through it, and the next touch anywhere sends it away. A withdrawal gets a quiet tick only. */
+function celebrate(title,sub,o){ o=o||{}; const quiet=!!o.out, big=!quiet&&o.amt>0;
+  if(navigator.vibrate) navigator.vibrate(quiet?[8]:big?[10,40,18,70,26]:[10,40,18]);
+  document.querySelectorAll(".yay").forEach(n=>n.remove());
+  const y=document.createElement("div"); y.className="yay"+(quiet?" quiet":"")+(big?" big":"");
+  y.innerHTML=`<span class="tick"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>${big?`<b class="yamt num" id="yAmt">${HIDE?"+₹••••":esc("+"+rs(0,false))}</b>`:""}<b>${esc(title)}</b><small>${esc(sub)}</small>${big&&o.t1!=null?`<small class="ytot">Total put in <span class="num" id="yTot">${HIDE?"₹••••":esc(rs(o.t0,false))}</span></small>`:""}${o.mile&&!quiet?`<span class="ymile">${esc(o.mile)}</span>`:""}${quiet?"":`<small style="color:var(--neon)">${esc(CHEERS[Math.floor(Math.random()*CHEERS.length)])}</small>`}`;
+  document.body.appendChild(y);
+  let gone=false; const bye=()=>{ if(gone) return; gone=true; removeEventListener("pointerdown",bye,true); y.classList.add("bye"); setTimeout(()=>y.remove(),400); };
+  setTimeout(bye,quiet?1500:big?2800:1900); setTimeout(()=>{ if(!gone) addEventListener("pointerdown",bye,true); },450);
+  if(big&&!HIDE){ countUp($("yAmt"),0,o.amt,750,v=>"+"+rs(v,false)); if(o.t1!=null) setTimeout(()=>countUp($("yTot"),o.t0,o.t1,950,v=>rs(v,false)),550); }
+  if(quiet) return;
+  if(!calm()){ S3.pulse&&S3.pulse(big?2.2:1.2); if(big){ flyCoin(); const st=$("stage"); if(st){ st.classList.remove("swell"); void st.offsetWidth; st.classList.add("swell"); } } }
   if(calm()) return;
   const c=document.createElement("canvas"); c.className="cele"; document.body.appendChild(c); const dpr=Math.min(2,devicePixelRatio||1); c.width=innerWidth*dpr; c.height=innerHeight*dpr; const g=c.getContext("2d"); g.scale(dpr,dpr);
   const cols=["#3CF0D4","#8B7CFF","#FFB547","#5B8CFF","#2EE6B0","#FF6FA8"], ox=innerWidth/2, oy=innerHeight*.38;
@@ -1717,6 +1754,12 @@ function buildDrawer(){
   if(M){ const r=agg("Stocks",WHO), up=upcomingList(30); $("dRetS").textContent="Stocks XIRR "+pct(r.x); $("dUpS").textContent=up.length?`${up.length} in the next 30 days`:"Nothing in 30 days";
     const lo=M.hold.filter(h=>okWho(h.who,WHO)&&h.inv>0&&h.gain<0).length; $("dMovS").textContent=`${lo} below cost`; }
   $("dInsS").textContent=M?`${policies().length} polic${policies().length===1?"y":"ies"}`:"";
+  { const dn=$("dNow"); if(dn){ if(!M) dn.innerHTML=""; else { const B=bellItems(), nx=upcomingList(30).filter(u=>u.k==="in").sort((a,b)=>a.d<b.d?-1:1)[0], mon=M.today.slice(0,7);
+      const put=SUM(((DATA&&DATA.led)||[]).filter(r=>String(r[1]).slice(0,7)===mon&&r[5]==="Buy"&&r[12]!=="nps"&&(WHO==="all"||r[2]===WHO)),r=>+r[10]||0);
+      dn.innerHTML=`<button type="button" class="dn" id="dnBell" style="--c:${B.n?"var(--accent)":"var(--ok)"}"><b>${B.n?B.n+" to check":"All clear"}</b><small>${B.n?"Open what needs you":"Nothing needs you"}</small></button>
+        <button type="button" class="dn" id="dnUp" style="--c:#FFB547"><b class="num">${nx?money(nx.a,true):"None due"}</b><small>${nx?esc("Next money in · "+fmtDs(nx.d)):"No money in 30 days"}</small></button>
+        <div class="dn" style="--c:var(--neon)"><b class="num">${money(put,true)}</b><small>Invested this month</small></div>`;
+      $("dnBell").onclick=fromDrawer(openBell); $("dnUp").onclick=fromDrawer(toolUpcoming); } } }
   segs("fAmt",[["short","Short ₹12.3L"],["full","Full ₹12,34,567"]],SHORT?"short":"full",v=>{ SHORT=v==="short"; store.set("amt",v); refresh(); });
   segs("fMotion",[["full","3D and motion"],["calm","Simple and still"]],store.get("calm",false)?"calm":"full",v=>setCalm(v==="calm"));
   segs("fLock",[["on","Fingerprint"],["off","Off"]],LOCK.on()?"on":"off",v=>{ if((v==="on")!==LOCK.on()) setLock(v==="on"); });
@@ -1745,6 +1788,17 @@ $("forgetBtn").onclick=fromDrawer(()=>{ if(OUT.length){ showToast("Some changes 
 function eye(){ $("eyeP").setAttribute("d",HIDE?"M3 3l18 18M10.6 6.1A9.8 9.8 0 0 1 12 6c6.4 0 10 6 10 6a17 17 0 0 1-3.2 3.9M6.6 6.6C3.9 8.3 2 12 2 12s3.6 6 10 6c1.6 0 3-.3 4.3-.9":"M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"); $("eyeBtn").setAttribute("aria-label",HIDE?"Show amounts":"Hide amounts"); }
 $("eyeBtn").onclick=()=>{ HIDE=!HIDE; store.set("hide",HIDE); eye(); refresh(); }; eye();
 function refresh(){ if(!PAINTED||document.documentElement.classList.contains("locked")) return; build(); if(TAB_NOW==="ins") renderIns(); else renderHome(); paintBell(); if(isOpen($("drawer"))) buildDrawer(); if(SC&&isOpen($("scr"))) renderScr(); if(isOpen($("sheet"))) doSearch(); }
+/* every tap answers: the control tilts toward the finger, a ring of light spreads from the touch, and the 3D background leans in */
+(()=>{ const rip=document.createElement("i"); rip.className="rip"; rip.setAttribute("aria-hidden","true"); document.body.appendChild(rip); let cur=null, t=0;
+  const SEL="button,a,[role=button],.tile,.pcard,.hl,.dt,.dn,.vcard,label.adate";
+  addEventListener("pointerdown",e=>{ if(calm()||document.documentElement.classList.contains("locked")) return; const el=e.target.closest&&e.target.closest(SEL); if(!el||el.disabled) return;
+    rip.style.left=e.clientX+"px"; rip.style.top=e.clientY+"px"; rip.classList.remove("go"); void rip.offsetWidth; rip.classList.add("go");
+    if(el.closest("#stage")||getComputedStyle(el).transform!=="none") return;   // already placed by a transform: leave its position alone
+    const r=el.getBoundingClientRect(); el.style.setProperty("--tx",(((e.clientX-r.left)/Math.max(1,r.width)-.5)*2).toFixed(2)); el.style.setProperty("--ty",(((e.clientY-r.top)/Math.max(1,r.height)-.5)*2).toFixed(2));
+    el.style.setProperty("--tk",r.width>220?"3":r.width>110?"7":"12");
+    clearTimeout(t); if(cur&&cur!==el) cur.classList.remove("tapd"); cur=el; el.classList.add("tapd"); },{passive:true});
+  const up=()=>{ const el=cur; cur=null; if(el) t=setTimeout(()=>el.classList.remove("tapd"),150); };
+  addEventListener("pointerup",up,{passive:true}); addEventListener("pointercancel",up,{passive:true}); })();
 $("verTxt").textContent="Version "+APP_VERSION;
 /* update card: never pops over an open screen or entry; waits until you're back on Home */
 let UPD=null, updT=0;

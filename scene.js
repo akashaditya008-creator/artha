@@ -15,6 +15,9 @@ const pointer={x:0,y:0,tx:0,ty:0}; let scrollK=0, tilt=null;
 addEventListener("pointermove",e=>{ pointer.tx=(e.clientX/innerWidth-.5)*2; pointer.ty=(e.clientY/innerHeight-.5)*2; },{passive:true});
 addEventListener("deviceorientation",e=>{ if(e.gamma==null) return; tilt={x:Math.max(-1,Math.min(1,e.gamma/35)),y:Math.max(-1,Math.min(1,(e.beta-45)/35))}; },{passive:true});
 S.scroll=y=>{ scrollK=Math.min(1,y/900); };
+/* the background leans toward every tap and rushes forward for a moment (more on a save or a new screen) */
+let boost=0; S.pulse=k=>{ boost=Math.min(2.4,boost+(k||1)); };
+addEventListener("pointerdown",e=>{ pointer.tx=(e.clientX/innerWidth-.5)*2; pointer.ty=(e.clientY/innerHeight-.5)*2; boost=Math.min(2.4,boost+.18); },{passive:true});
 S.theme=name=>{ if(!webgl) return; tgtCol=new T.Color(THEME[name]||THEME.home); };
 
 /* ---------- floating line-art: space and markets ---------- */
@@ -67,11 +70,15 @@ S.initBg=function(canvas){
   for(let i=0;i<N;i++){ p[i*3]=(Math.random()-.5)*60; p[i*3+1]=(Math.random()-.4)*24; p[i*3+2]=-Math.random()*70+6; }
   g.setAttribute("position",new T.BufferAttribute(p,3));
   const dust=new T.Points(g,new T.PointsMaterial({color:col,size:.07,transparent:true,opacity:.75,blending:T.AdditiveBlending,depthWrite:false})); scene.add(dust);
-  const solids=[]; [[T.IcosahedronGeometry,[1.1,0]],[T.OctahedronGeometry,[.8,0]],[T.TorusKnotGeometry,[.6,.16,64,8]],[T.IcosahedronGeometry,[.7,0]]].forEach(([G,a],i)=>{
-    const m=new T.Mesh(new G(...a),new T.MeshBasicMaterial({color:col,wireframe:true,transparent:true,opacity:.22}));
-    m.position.set([-5,5.5,-4,4.5][i],[2.5,-.5,-1.8,3.6][i],[-8,-10,-14,-18][i]); m.userData.s=.12+Math.random()*.2; scene.add(m); solids.push(m); });
+  /* wireframe solids at several depths (near ones drift past the edges of the screen) */
+  const SOL=[[T.IcosahedronGeometry,[1.1,0],-5,2.5,-8],[T.OctahedronGeometry,[.8,0],5.5,-.5,-10],[T.TorusKnotGeometry,[.6,.16,64,8],-4,-1.8,-14],[T.IcosahedronGeometry,[.7,0],4.5,3.6,-18],
+    [T.TorusGeometry,[.9,.06,8,40],-6.5,4.6,-12],[T.DodecahedronGeometry,[.6,0],6.8,2.2,-7],[T.TetrahedronGeometry,[.7,0],-2.2,5.2,-20],[T.CylinderGeometry,[.5,.5,.14,24],2.4,-2.2,-9],
+    [T.BoxGeometry,[.8,.8,.8],-7.5,-.6,-16],[T.TorusGeometry,[.5,.05,8,32],.8,4.4,-11],[T.CylinderGeometry,[.36,.36,.1,20],-3.2,3.4,-6],[T.OctahedronGeometry,[.45,0],3.6,5,-13]];
+  const solids=[]; SOL.forEach(([G,a,x,y,z])=>{ if(!G) return;
+    const m=new T.Mesh(new G(...a),new T.MeshBasicMaterial({color:col,wireframe:true,transparent:true,opacity:.2}));
+    m.position.set(x,y,z); m.userData.s=.12+Math.random()*.2; m.userData.y=y; scene.add(m); solids.push(m); });
   /* drifting space + market line-art, kept faint so the numbers stay readable */
-  const KINDS=["planet","candles","galaxy","trend","moon","rupee","stars","bars","comet","pie","sun","area","orbit","nebula","coins","saturn","candles","stars","trend","asteroid","galaxy","bars","comet","area"], arts=[];
+  const KINDS=["planet","candles","galaxy","trend","moon","rupee","stars","bars","comet","pie","sun","area","orbit","nebula","coins","saturn","candles","stars","trend","asteroid","galaxy","bars","comet","area","rupee","coins","pie","orbit","planet","trend","coins","rupee","bars","moon"], arts=[];
   KINDS.forEach((k,i)=>{ const mat=new T.SpriteMaterial({map:art(k),color:col,transparent:true,opacity:0,depthWrite:false,blending:T.AdditiveBlending});
     const s=new T.Sprite(mat), z=-7-((i*7.3)%24), sz=1.6+((i*1.37)%1.8);
     s.position.set(((i*5.1+i*i*.37)%20)-10,((i*3.7+i*.9)%9.6)-2.6,z); s.scale.set(sz,sz,1);
@@ -84,16 +91,17 @@ S.initBg=function(canvas){
   const loop=now=>{ requestAnimationFrame(loop); if(document.hidden||document.documentElement.classList.contains("calm")) return;
     const dt=Math.min(.05,(now-last)/1000); last=now; const calm=S.calm(), sp=calm?0:1;
     BG.col.lerp(tgtCol,.04); grid.material.color.copy(BG.col); dust.material.color.copy(BG.col); solids.forEach(m=>m.material.color.copy(BG.col));
-    grid.position.z=(grid.position.z+dt*.9*sp)%2; grid2.position.z=grid.position.z;
-    dust.rotation.y+=dt*.012*sp; dust.position.z=(dust.position.z+dt*.6*sp)%20;
-    solids.forEach((m,i)=>{ m.rotation.x+=dt*m.userData.s*sp; m.rotation.y+=dt*m.userData.s*.8*sp; m.position.y+=Math.sin(now/1600+i)*.002*sp; });
+    boost*=Math.pow(.02,dt); if(boost<.004) boost=0; const warp=1+boost*7;
+    grid.position.z=(grid.position.z+dt*.9*sp*warp)%2; grid2.position.z=grid.position.z; grid.material.opacity=.16+Math.min(.2,boost*.12);
+    dust.rotation.y+=dt*.012*sp; dust.position.z=(dust.position.z+dt*.6*sp*warp)%20;
+    solids.forEach((m,i)=>{ m.rotation.x+=dt*m.userData.s*sp; m.rotation.y+=dt*m.userData.s*.8*sp; m.position.y+=Math.sin(now/1600+i)*.002*sp; m.material.opacity=.2+Math.min(.35,boost*.2); });
     arts.forEach(s=>{ const u=s.userData; s.material.color.copy(BG.col);
       s.position.x+=u.vx*dt*sp; s.position.y+=(u.vy*dt+Math.sin(now/2600+u.ph)*.0016)*sp; s.material.rotation+=u.vr*dt*sp;
       if(s.position.x>11) s.position.x=-11; if(s.position.x<-11) s.position.x=11; if(s.position.y>7) s.position.y=-3; if(s.position.y<-3.2) s.position.y=7;
       const tw=u.o*(.75+.25*Math.sin(now/3200+u.ph)); s.material.opacity+=(tw-s.material.opacity)*.02; });
     const tx=tilt?tilt.x:pointer.tx, ty=tilt?tilt.y:pointer.ty;
     pointer.x+=(tx-pointer.x)*.04; pointer.y+=(ty-pointer.y)*.04;
-    cam.position.x=pointer.x*.9; cam.position.y=1.6-pointer.y*.5-scrollK*2.2; cam.lookAt(0,-scrollK*1.5,-6);
+    cam.position.x=pointer.x*.9; cam.position.y=1.6-pointer.y*.5-scrollK*2.2; cam.position.z=9-Math.min(1.6,boost*.8); cam.lookAt(0,-scrollK*1.5,-6);
     r.render(scene,cam); };
   requestAnimationFrame(loop);
 };
