@@ -1,6 +1,6 @@
-const load=require('./mock.js'); let fail=0; const ok=(c,m)=>{ console.log((c?'PASS ':'FAIL ')+m); if(!c) fail++; };
+const path=require('path'), load=require('./mock.js'), GS=path.join(__dirname,'family-Code.gs'); let fail=0; const ok=(c,m)=>{ console.log((c?'PASS ':'FAIL ')+m); if(!c) fail++; };
 const FAMILY={id:'parents',label:'Mom & Dad',people:['Mom','Dad'],users:{'adi@x.com':{name:'Aditya',role:'admin'},'mom@x.com':{name:'Mom',role:'editor'},'dad@x.com':{name:'Dad',role:'viewer'}},acct0:['Groww · Mom'],features:{simple:true}};
-const B=load('./family-Code.gs',{FAMILY:JSON.stringify(FAMILY)}); B.ctx.__api.setupFamily();
+const B=load(GS,{FAMILY:JSON.stringify(FAMILY)}); B.ctx.__api.setupFamily();
 const login=e=>B.post({action:'login',e:{idToken:B.idToken(e)}});
 const adi=login('adi@x.com'), mom=login('mom@x.com'), dad=login('dad@x.com'), bad=login('stranger@x.com');
 ok(adi.ok&&adi.d.role==='admin'&&adi.d.fam==='parents'&&/^[0-9a-f]{64}$/.test(adi.d.tok),'admin signs in and gets a session key');
@@ -37,6 +37,6 @@ const sh=B.book.sheets.Ledger; sh.rows.push(['L9999',new Date(),'Mom','Groww · 
 r=B.post({action:'add',pass:adi.d.tok,e:{rows:[row,row],rid:'r9'}}); ok(r.ok&&r.d.added.join()==='L10000,L10001','IDs continue correctly past L9999');
 // removing a person from FAMILY signs them out at once
 const F2=JSON.parse(B.P.FAMILY); delete F2.users['mom@x.com']; B.P.FAMILY=JSON.stringify(F2); B.ctx.FAM_=null;
-const B3=load('./family-Code.gs',B.P); // a fresh run, as every web request is
+const B3=load(GS,B.P); // a fresh run, as every web request is
 r=B3.post({action:'get',pass:mom.d.tok,e:{}}); ok(!r.ok&&/^SIGNIN/.test(r.m),'a person removed from FAMILY is signed out on their next request');
 console.log(fail?fail+' FAILED':'ALL PASSED'); process.exit(fail?1:0);
