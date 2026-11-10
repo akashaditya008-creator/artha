@@ -1,7 +1,7 @@
 /* Artha 3.9 — investments + insurance. Data lives in the "Artha – My Investments" Google Sheet via the Apps Script API. */
 (()=>{
 "use strict";
-const APP_VERSION="3.11.1";
+const APP_VERSION="3.12.0";
 /* Personal details (banks, platforms, the Claude project link) come from the backend after sign-in, so this public code holds none. */
 const CFG=()=>(typeof DATA!=="undefined"&&DATA&&DATA.cfg)||{};
 const PROJECT_URL=()=>{ const u=safeUrl(CFG().project); return u==="#"?"https://claude.ai/projects":u; };
@@ -13,7 +13,13 @@ const safeUrl=u=>{ if(!u) return "#"; try{ const x=new URL(String(u),location.hr
 const SUM=(a,f)=>a.reduce((s,x)=>s+(f?f(x):x),0);
 const splitPr=v=>{ const i=v.lastIndexOf("|"); return [v.slice(0,i),v.slice(i+1)]; };
 const rid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
-const S3=window.Scene3D||{ok:false,theme(){},scroll(){},initBg(c){c.remove();},ring(){return false;},ringColor(){}};
+/* 3D layer: three.js (600 KB) is loaded after the app itself has started, so it never delays the lock screen; until then a stub answers */
+let S3={ok:false,stub:true,theme(){},scroll(){},initBg(){},ring(){return false;},ringColor(){},ringFocus(){},setCalm(){}};
+let ready3D=null;
+function load3D(){ if(ready3D) return ready3D; const one=(src,sri)=>new Promise(res=>{ const s=document.createElement("script"); s.src=src; if(sri) s.integrity=sri; s.onload=()=>res(true); s.onerror=()=>res(false); document.head.appendChild(s); });
+  const sri=(document.querySelector('meta[name="three-sri"]')||{}).content||"";
+  return ready3D=one("three.min.js",sri).then(()=>one("scene.js?v="+APP_VERSION)).then(()=>{ if(window.Scene3D) S3=window.Scene3D; else { const c=$("bg3d"); if(c) c.remove(); } return S3.ok; },()=>false); }
+const soon3D=ms=>Promise.race([load3D(),new Promise(r=>setTimeout(r,ms))]);
 
 /* ---------- endpoint (only from the private setup link) ---------- */
 function takeLink(s){ const m=/[#&?]k=([\w-]{20,})/.exec(s||"")||/\/macros\/s\/([\w-]{20,})\//.exec(s||""); if(!m) return false; store.set("api","https://script.google.com/macros/s/"+m[1]+"/exec"); return true; }
@@ -1007,6 +1013,20 @@ const PTYPES=["health","car","bike","life","home","travel","other"], PICON={heal
 const labels=()=>{ const r=M&&M.rec.get("labels"); return r?r.d:{}; };
 const L=k=>{ const v=(labels().t||{})[k]; return v&&String(v).trim()?v:LBL0[k]||k; };
 const extraFor=t=>{ const e=(labels().extra||{})[t]; return Array.isArray(e)?e:EXTRA0[t]||[]; };
+/* what a policy looks like from its own words (IDV / registration number = a vehicle, room rent / co-pay = health…); "" when unsure */
+function guessPolType(texts){ const t=texts.filter(Boolean).join(" · ").toLowerCase(); if(!t) return "";
+  const veh=/\bidv\b|insured declared value|registration n|\bregn?\b|chassis|engine n|own damage|third[- ]party|\bncb\b|no claim bonus|motor (policy|insurance)|\b[a-z]{2}[ -]?\d{1,2}[ -]?[a-z]{1,3}[ -]?\d{4}\b/.test(t);
+  if(veh) return /two[- ]?wheeler|scooter|scooty|\bbike\b|motor ?cycle|activa|\bola s1|jupiter|splendor|pulsar|royal enfield/.test(t)?"bike":"car";
+  if(/room rent|co-?pay|hospital|mediclaim|cashless|pre-existing|sum insured.*(member|family)|floater/.test(t)) return "health";
+  if(/sum assured|death benefit|term (plan|life|insurance)|life cover|nominee.*(death|life)/.test(t)) return "life";
+  if(/trip|travel|baggage|passport|schengen/.test(t)) return "travel";
+  if(/\bhome\b|building|contents|burglary|householder/.test(t)) return "home";
+  return ""; }
+const polTexts=p=>{ const a=[p.d.title,p.d.insured]; termsOf(p.id).forEach(t=>{ a.push(t.d.policyNo); Object.entries(t.d.fields||{}).forEach(([k,v])=>a.push(k+" "+v)); (t.d.highlights||[]).slice(0,6).forEach(h=>a.push(h)); }); return a; };
+/* policies filed under one type whose own details say another: asked once each in the bell, never changed silently */
+const polMisfiled=()=>policies().filter(p=>!p.d.typeOk).map(p=>({p,g:guessPolType(polTexts(p))})).filter(x=>x.g&&x.g!==p_type(x.p)&&!(x.g==="car"&&p_type(x.p)==="bike"&&!/car\b/i.test(x.p.d.title)));
+const p_type=p=>PTYPES.includes(p.d.type)?p.d.type:"other";
+function setPolType(p,type,ok){ const data=Object.assign({},p.d,ok?{typeOk:M.today}:{type,typeOk:M.today}); OUT.push({kind:"rec",ops:[{id:p.id,kind:"pol",title:p.d.title,data}],rid:rid()}); saveOut(); flush(); refresh(); }
 const polIcon=p=>PICON[p.d.type]||"shield", polCol=p=>PCOL[p.d.type]||PCOL.other;
 function policies(){ const P=recs("pol").filter(p=>!p.d.archived);
   if(M.term&&M.term.T.length&&!M.rec.has("pol-term")) P.push({id:"pol-term",kind:"pol",synthetic:1,d:{title:"Term life",type:"life",insured:"Aditya",holder:"Aditya",link:"term"}});
@@ -1064,7 +1084,7 @@ const docRow=f=>`<a class="doc" href="${esc(safeUrl(f.url))}" target="_blank" re
 function addPolicy(){ policyForm(null,null,{}); }
 function editPolicy(pid,tid){ policyForm(pid,tid||"",{}); }
 function policyForm(pid,tid,opt){ const p=pid?policies().find(x=>x.id===pid):null, t=tid?M.rec.get(tid):null, prev=p&&!t&&opt.renew?currentTerm(pid):null, d=t?t.d:{};
-  const st={type:p?p.d.type:"health",title:p?p.d.title:"",holder:p?p.d.holder||"Aditya":"Aditya",insured:p?p.d.insured||"":"",insurer:d.insurer||(prev&&prev.d.insurer)||"",policyNo:d.policyNo||"",
+  const st={type:p?p.d.type:"",title:p?p.d.title:"",holder:p?p.d.holder||"Aditya":"Aditya",insured:p?p.d.insured||"":"",insurer:d.insurer||(prev&&prev.d.insurer)||"",policyNo:d.policyNo||"",
     premium:d.premium||"",cover:d.cover||(prev&&prev.d.cover)||"",start:d.start||(prev&&prev.d.end?addDays(prev.d.end,1):""),end:d.end||"",extra:Object.entries(d.fields||{}).map(([k,v])=>({k,v})),
     hi:(d.highlights||[]).join("\n"),co:(d.covered||[]).join("\n"),no:(d.notCovered||[]).join("\n"),ex:(d.exclusions||[]).join("\n"),files:[],read:true,remind:p&&p.d.remind?p.d.remind:remindPref()};
   const term=p&&p.d.link==="term";
@@ -1074,8 +1094,11 @@ function policyForm(pid,tid,opt){ const p=pid?policies().find(x=>x.id===pid):nul
     const pr=g("fPr"), cv=g("fCv"); if(pr!=null) st.premium=numIn(pr)||""; if(cv!=null) st.cover=numIn(cv)||"";
     st.extra=[...document.querySelectorAll("#fX .rr")].map(r=>({k:r.querySelector("[data-k]").value,v:r.querySelector("[data-v]").value})); const rd=$("fRead"); if(rd) st.read=rd.checked; };
   const draw=()=>{ const head=!p?"Add a policy":opt.renew?`Next year · ${p.d.title}`:`Edit · ${p.d.title}`;
+    const pick=`<div class="fld"><span>What is insured?</span><div class="tgrid" id="fT">${PTYPES.map(k=>`<button type="button" data-v="${k}" aria-pressed="${st.type===k}" style="--c:${PCOL[k]}">${svgI(PICON[k],PCOL[k],22)}<span>${esc(LBL0["t_"+k])}</span></button>`).join("")}</div></div>`;
+    /* a new policy: choose what it is first, the rest of the form follows */
+    if(!p&&!st.type){ openE(`<div class="t big">${esc(head)}</div>${pick}${closeBtn}`); $("fT").querySelectorAll("[data-v]").forEach(b=>b.onclick=()=>{ st.type=b.dataset.v; draw(); }); return; }
     openE(`<div class="t big">${esc(head)}</div>
-    ${!p?`<div class="fld"><span>What is insured?</span><div class="tgrid" id="fT">${PTYPES.map(k=>`<button type="button" data-v="${k}" aria-pressed="${st.type===k}" style="--c:${PCOL[k]}">${svgI(PICON[k],PCOL[k],22)}<span>${esc(LBL0["t_"+k])}</span></button>`).join("")}</div></div>`:""}
+    ${!opt.renew?pick:""}
     ${opt.renew?"":`<label class="fld"><span>Give it a name</span><input id="fN" value="${esc(st.title)}" placeholder="${esc(nameEg[st.type])}"></label>
     <div class="fld"><span>Whose policy</span><div class="seg sm" id="fH">${["Aditya","Spardha","Father","Other"].map(v=>`<button type="button" data-v="${v}" aria-pressed="${st.holder===v||(v==="Other"&&!["Aditya","Spardha","Father"].includes(st.holder))}">${v}</button>`).join("")}</div>${!["Aditya","Spardha","Father"].includes(st.holder)?`<input id="fHo" value="${esc(st.holder==="Other"?"":st.holder)}" placeholder="Name">`:""}</div>
     <label class="fld"><span>${st.type==="car"||st.type==="bike"?"Vehicle (model and number)":"Who is covered"}</span><input id="fI" value="${esc(st.insured)}" placeholder="${st.type==="car"||st.type==="bike"?"Activa · KA03 AB 1234":"Aditya, Spardha"}"></label>`}
@@ -1104,11 +1127,12 @@ function policyForm(pid,tid,opt){ const p=pid?policies().find(x=>x.id===pid):nul
       if(t) OUT.push({kind:"rec",ops:[{id:t.id,del:true}],rid:rid()}); else { OUT.push({kind:"rec",ops:[{id:pid,kind:"pol",title:p.d.title,data:Object.assign({},p.d,{archived:M.today})}],rid:rid()}); queueCal(polCal(pid,p.d.title,polEnd(p),false)); }
       saveOut(); flush(); ov.back(); if(!t) setTimeout(()=>{ if(SC&&SC.h==="pol") ov.back(); },260); refresh(); });
     $("fOk").onclick=async()=>{ keep(); const holder=st.holder==="Other"||!["Aditya","Spardha","Father"].includes(st.holder)?(st.holderO||"").trim()||"Other":st.holder;
+      if(!PTYPES.includes(st.type)){ $("fE").textContent="Choose what is insured."; return; }
       if(!opt.renew&&!st.title.trim()){ $("fE").textContent="Give the policy a name."; return; }
       if(st.start&&st.end&&st.end<st.start){ $("fE").textContent="The end date is before the start date."; return; }
       const id=pid||"pol-"+rid(), title=(opt.renew?p.d.title:st.title.trim()), lines=s=>String(s||"").split("\n").map(x=>x.trim()).filter(Boolean), fields={};
       st.extra.forEach(x=>{ if(x.k.trim()&&x.v.trim()) fields[x.k.trim()]=x.v.trim(); });
-      const pd=Object.assign({},p?p.d:{created:M.today},{title,type:st.type,insured:(st.insured||"").trim(),holder,remind:st.remind}); delete pd.link; if(term) pd.link="term";
+      const pd=Object.assign({},p?p.d:{created:M.today},(!p||p.d.type!==st.type)?{typeOk:M.today}:{},{title,type:st.type,insured:(st.insured||"").trim(),holder,remind:st.remind}); delete pd.link; if(term) pd.link="term";
       const ops=[{id,kind:"pol",title,data:pd}]; let tidN=null;
       if(!term){ tidN=t?t.id:"pt-"+rid(); ops.push({id:tidN,kind:"pterm",title,data:Object.assign({},d,{pol:id,created:d.created||M.today,insurer:st.insurer.trim(),policyNo:st.policyNo.trim(),start:st.start,end:st.end,premium:st.premium,cover:st.cover,fields,
         highlights:lines(st.hi),covered:lines(st.co),notCovered:lines(st.no),exclusions:lines(st.ex),docs:d.docs||[]})}); }
@@ -1137,15 +1161,19 @@ function policyRead(pid,tid){ const p=policies().find(x=>x.id===pid), t=tid&&M.r
 function reviewPolicy(r){ const d=r.d, x=d.res||{}, c=d.ctx||{}, p=policies().find(q=>q.id===c.pol), t=c.term&&M.rec.get(c.term);
   if(!p||!t){ openE(`<div class="t big">${esc(d.title)}</div><div class="s">The policy for this document was removed.</div><button class="go" id="rpDel">Clear it</button>${closeBtn}`); $("rpDel").onclick=()=>{ inboxDone(r.id,"removed"); ov.back(); refresh(); }; return; }
   const F=Object.assign({},x.fields||{}); const li=a=>Array.isArray(a)?a.filter(Boolean):[];
+  const seen=PTYPES.includes(x.type)?x.type:guessPolType([x.insured].concat(Object.entries(F).map(([k,v])=>k+" "+v),li(x.highlights).slice(0,6))); let useType=seen&&seen!==p.d.type?seen:p.d.type;
   openE(`<div class="t big">${svgI("spark","var(--neon2)",20)} ${esc(p.d.title)} · check and save</div>
+    ${seen&&seen!==p.d.type?`<div class="fld"><span>This reads like a ${esc(LBL0["t_"+seen])} policy, but it is filed under ${esc(L("t_"+p.d.type))}. File it under</span><div class="seg sm" id="rpT"><button type="button" data-v="${seen}" aria-pressed="true">${esc(LBL0["t_"+seen])}</button><button type="button" data-v="${esc(p.d.type)}" aria-pressed="false">${esc(L("t_"+p.d.type))}</button></div></div>`:""}
     ${dl([[L("f_insurer"),esc(x.insurer||"—")],[L("f_policyNo"),esc(x.policyNo||"—")],[L("f_start"),x.start?fmtD(x.start):"—"],[L("f_end"),x.end?fmtD(x.end):"—"],[L("f_premium"),x.premium?money(+x.premium,false):"—"],[L("cover_"+p.d.type),x.cover?money(+x.cover,false):"—"]].concat(Object.entries(F).slice(0,10).map(([k,v])=>[k,esc(v)])))}
     ${li(x.highlights).length?`<div class="sect"><h5>${esc(L("sec_high"))}</h5><ul>${li(x.highlights).map(s=>`<li>${esc(s)}</li>`).join("")}</ul></div>`:""}
     <div class="s" style="text-align:left">${li(x.covered).length} covered · ${li(x.notCovered).length} not covered · ${li(x.exclusions).length} exclusions. You can edit everything after saving.</div>
     <button class="go" type="button" id="rpOk">Save to ${esc(p.d.title)}</button><div class="btns"><button class="x" type="button" id="rpDel">Discard</button>${closeBtn}</div>`);
+  const rt=$("rpT"); if(rt) rt.querySelectorAll("[data-v]").forEach(b=>b.onclick=()=>{ useType=b.dataset.v; rt.querySelectorAll("[data-v]").forEach(z=>z.setAttribute("aria-pressed",String(z===b))); });
   $("rpDel").onclick=()=>{ inboxDone(r.id,"removed"); OUT.push({kind:"rec",ops:[{id:t.id,kind:"pterm",title:p.d.title,data:Object.assign({},t.d,{status:""})}],rid:rid()}); saveOut(); ov.back(); refresh(); };
   $("rpOk").onclick=()=>{ const nd=Object.assign({},t.d,{status:"",read:M.today,src:"Claude",insurer:x.insurer||t.d.insurer||"",policyNo:x.policyNo||t.d.policyNo||"",start:x.start||t.d.start||"",end:x.end||t.d.end||"",premium:+x.premium||t.d.premium||"",cover:+x.cover||t.d.cover||"",
       fields:Object.assign({},t.d.fields||{},F),covered:li(x.covered),notCovered:li(x.notCovered),exclusions:li(x.exclusions),highlights:li(x.highlights)});
-    const ops=[{id:t.id,kind:"pterm",title:p.d.title,data:nd}]; if(x.insured&&!p.d.insured) ops.push({id:p.id,kind:"pol",title:p.d.title,data:Object.assign({},p.d,{insured:x.insured})});
+    const ops=[{id:t.id,kind:"pterm",title:p.d.title,data:nd}], pd2=Object.assign({},p.d); if(x.insured&&!p.d.insured) pd2.insured=x.insured; if(seen&&seen!==p.d.type){ pd2.type=useType; pd2.typeOk=M.today; }
+    if(pd2.insured!==p.d.insured||pd2.type!==p.d.type||pd2.typeOk!==p.d.typeOk) ops.push({id:p.id,kind:"pol",title:p.d.title,data:pd2});
     OUT.push({kind:"rec",ops,rid:rid()}); queueCal(polCal(p.id,p.d.title,nd.end,(p.d.remind||remindPref())==="cal")); inboxDone(r.id); saveOut(); ov.back(); refresh(); flush(); showToast("Policy details saved"); setTimeout(()=>openPolicy(p.id),100); }; }
 /* ---------- search ---------- */
 function openSearch(){ $("q").value=""; doSearch(); ov.open($("sheet"),()=>{ vanish($("sheet")); }); setTimeout(()=>$("q").focus(),60); }
@@ -1412,12 +1440,15 @@ function celebrate(title,sub){ if(navigator.vibrate) navigator.vibrate([10,40,18
     if(k<2.3) requestAnimationFrame(step); else c.remove(); }; requestAnimationFrame(step); }
 
 /* ---------- sync ---------- */
-let loading=false, flushing=false;
+let loading=false, flushing=false, PAINTED=false;
 function setSync(kind,txt){ $("syncLine").className=kind||""; $("syncTxt").textContent=txt; }
 const fmtWhen=t=>{ if(!t) return "never"; const m=Math.round((Date.now()-t)/6e4); return m<1?"just now":m<60?m+" min ago":m<1440?Math.round(m/60)+" h ago":new Date(t).toLocaleDateString("en-IN",{day:"numeric",month:"short"}); };
 const liveLine=()=>`Synced ${fmtWhen(CACHE_AT)}`+(OUT.length?` · ${OUT.length} waiting`:"")+(FAILED.length?` · ${FAILED.length} not saved`:"")+(CHECKS().length?" · check the bell":"");
+/* the sheet copy is compared with the one already on screen (ignoring only the time it was sent), so an unchanged sync redraws nothing */
+const dataKey=d=>{ try{ return JSON.stringify(d,(k,v)=>k==="at"?undefined:v); }catch(e){ return ""; } };
+const sameData=(a,b)=>!!(a&&b&&PAINTED&&dataKey(a)===dataKey(b));
 function applyData(d){ if(!d) return; if(d.v!==3){ DATA=d; refresh(); setSync("warn","Paste the new Artha backend (v3) and run setupV3() to see your data"); return; }
-  const prev=DATA; DATA=d; CACHE_AT=Date.now(); store.set("cache",d); store.set("cacheAt",CACHE_AT); refresh(); setSync(OUT.length||FAILED.length?"warn":"live",liveLine()); refreshNavs();
+  const prev=DATA, same=sameData(prev,d); DATA=d; CACHE_AT=Date.now(); store.set("cacheAt",CACHE_AT); if(!same){ store.set("cache",d); refresh(); } setSync(OUT.length||FAILED.length?"warn":"live",liveLine()); refreshNavs();
   reconcile(d,prev).catch(()=>{}); }
 function errText(e){ const m=String(e&&e.message||e||"");
   if(/SIGNIN/.test(m)){ store.set("tok",""); askPass(m.replace(/^SIGNIN:\s*/,"")); return "Please sign in."; }
@@ -1466,14 +1497,14 @@ const ub64=s=>Uint8Array.from(atob(s.replace(/-/g,"+").replace(/_/g,"/")),c=>c.c
 const LOCK={ locked:false, hiddenAt:0, AFTER:60000,
   can:()=>!!(window.PublicKeyCredential&&navigator.credentials&&window.isSecureContext),
   on:()=>!!store.get("bioId",""),
-  show(){ if(!LOCK.on()) return; LOCK.locked=true; LOCK.seen(0); document.documentElement.classList.add("locked"); $("lock").hidden=false; $("lockErr").textContent="";
+  show(){ if(!LOCK.on()) return; LOCK.locked=true; document.documentElement.classList.remove("prelock"); LOCK.seen(0); document.documentElement.classList.add("locked"); $("lock").hidden=false; $("lockErr").textContent="";
     /* clear the figures from the page itself (not just cover them); they are drawn again after the fingerprint check */
     ["legend","ledger","viewIns","scrBody","res"].forEach(id=>{ const n=$(id); if(n) n.innerHTML=""; });
     ["f0","f1","f2"].forEach(id=>{ const n=$(id); if(n) n.querySelectorAll(".num,b,strong").forEach(x=>{ x.textContent="••••"; }); }); },
   /* a pull-to-refresh or reload in the same session, within a minute of last use, does not ask again; a fresh open always does */
   seen(t){ try{ if(t) sessionStorage.setItem("arthaSeen",String(t)); else sessionStorage.removeItem("arthaSeen"); }catch(e){} },
   recent(){ try{ const t=+sessionStorage.getItem("arthaSeen")||0; return t>0&&Date.now()-t<LOCK.AFTER; }catch(e){ return false; } },
-  unlock(){ const was=LOCK.locked; LOCK.locked=false; LOCK.seen(Date.now()); document.documentElement.classList.remove("locked","veil"); $("lock").hidden=true; if(was&&DATA) refresh(); } };
+  unlock(){ const was=LOCK.locked; LOCK.locked=false; LOCK.seen(Date.now()); document.documentElement.classList.remove("locked","veil","prelock"); $("lock").hidden=true; if(!PAINTED) soon3D(700).then(firstPaint); else if(was&&DATA) refresh(); } };
 async function bioCreate(){ const cred=await navigator.credentials.create({publicKey:{challenge:crypto.getRandomValues(new Uint8Array(32)),rp:{name:"Artha"},
   user:{id:crypto.getRandomValues(new Uint8Array(16)),name:store.get("email","")||"artha",displayName:"Artha · "+(store.get("me","")||"me")},
   pubKeyCredParams:[{type:"public-key",alg:-7},{type:"public-key",alg:-257}],
@@ -1484,7 +1515,7 @@ async function bioCheck(){ const a=await navigator.credentials.get({publicKey:{c
 async function unlockNow(){ $("lockErr").textContent=""; try{ await bioCheck(); LOCK.unlock(); if(Date.now()-CACHE_AT>60000) pull(); }catch(e){ $("lockErr").textContent=e&&e.name==="NotAllowedError"?"Cancelled. Tap Unlock to try again.":String(e&&e.message||e); } }
 $("lockBtn").onclick=unlockNow;
 $("lockAlt").onclick=()=>{ store.set("tok",""); $("lock").hidden=true; askPass("Sign in with Google to open Artha."); };
-function lockOnStart(){ if(LOCK.on()){ if(LOCK.recent()){ LOCK.seen(Date.now()); return; } LOCK.show(); setTimeout(unlockNow,350); } }
+function lockOnStart(){ if(LOCK.on()&&!LOCK.recent()){ LOCK.show(); setTimeout(unlockNow,60); return true; } if(LOCK.on()) LOCK.seen(Date.now()); document.documentElement.classList.remove("locked","prelock"); return false; }
 addEventListener("pagehide",()=>{ if(!LOCK.locked&&LOCK.on()&&document.visibilityState==="visible") LOCK.seen(Date.now()); }); // only a reload while in use, not a page dropped in the background
 function offerLock(){ store.set("bioAsked",true);
   openE(`<div class="t big">Lock Artha with your fingerprint?</div><div class="s" style="text-align:left">Artha will ask for your fingerprint or face each time you open it, and after a minute in the background. You can turn it off in the menu.</div><button class="go" type="button" id="olY">Turn on</button><button class="x" type="button" id="olN">Not now</button>`);
@@ -1507,15 +1538,19 @@ function CHECKS(){ const L=[];
   FAILED.forEach(f=>L.push({id:"f:"+f.rid,sev:"bad",title:"Not saved to the sheet",sub:`${f.kind==="add"?(f.rows||[]).map(descRow).join("; "):f.kind+" "+(f.id||"")} · ${f.err}`}));
   OUT.filter(o=>o.at&&Date.now()-o.at>864e5).forEach(o=>L.push({id:"o:"+o.rid,sev:"due",title:"Waiting to sync for over a day",sub:o.kind==="add"?(o.rows||[]).map(descRow).join("; "):o.kind}));
   ISSUES.forEach(i=>L.push({id:"i:"+i.id,sev:i.sev||"due",title:i.title,sub:i.sub}));
+  if(M) polMisfiled().forEach(x=>L.push({id:"p:"+x.p.id,sev:"due",title:`${x.p.d.title}: is this a ${LBL0["t_"+x.g]} policy?`,sub:`It is filed under ${LBL0["t_"+p_type(x.p)]}, but its details read like ${LBL0["t_"+x.g]} · tap to choose`}));
   ((DATA&&DATA.chk)||[]).forEach(c=>L.push({id:"c:"+c[0],sev:"due",title:`Sheet row ${c[1]} (${c[0]}) needs fixing`,sub:c[2]+" · fix it in the sheet; Artha may count it wrongly until then"}));
   return L; }
 function openCheck(cid){ const x=CHECKS().find(c=>c.id===cid); if(!x) return; const k=cid.slice(0,2);
   let btns=`<button class="x" type="button" data-close>Close</button>`;
   if(k==="f:") btns=`<button class="go" type="button" id="ckRetry">Try saving again</button><button class="x danger" type="button" id="ckDrop">Discard this change</button>`+btns;
   if(k==="i:") btns=`<button class="go" type="button" id="ckOk">I've checked it · dismiss</button>`+btns;
+  const mis=k==="p:"?polMisfiled().find(z=>"p:"+z.p.id===cid):null;
+  if(mis) btns=`<button class="go" type="button" id="ckMove">Move to ${esc(LBL0["t_"+mis.g])}</button><button class="x" type="button" id="ckKeep">Keep under ${esc(LBL0["t_"+p_type(mis.p)])}</button>`+btns;
   if(k==="c:"&&M&&M.url) btns=`<a class="go" href="${esc(safeUrl(M.url))}" target="_blank" rel="noopener noreferrer">Open the sheet</a>`+btns;
   const it=k==="i:"?ISSUES.find(i=>"i:"+i.id===cid):null;
   openE(`<div class="t big">${esc(x.title)}</div><div class="s" style="text-align:left;white-space:pre-wrap">${esc(it&&it.detail||x.sub)}</div>${btns}`);
+  if(mis){ $("ckMove").onclick=()=>{ ov.back(); setPolType(mis.p,mis.g,false); showToast(`Moved to ${LBL0["t_"+mis.g]}`); }; $("ckKeep").onclick=()=>{ ov.back(); setPolType(mis.p,"",true); }; }
   const r=$("ckRetry"); if(r) r.onclick=()=>{ const f=FAILED.find(f=>"f:"+f.rid===cid); FAILED=FAILED.filter(z=>z!==f); saveFailed(); if(f){ delete f.err; delete f.failedAt; f.rid=rid(); OUT.push(f); saveOut(); } ov.back(); refresh(); flush(); };
   const dr=$("ckDrop"); if(dr) dr.onclick=()=>confirmSheet("Discard this change?","It was never saved to the sheet. Discarding removes it from this phone too.","Discard",()=>{ FAILED=FAILED.filter(f=>"f:"+f.rid!==cid); saveFailed(); ov.back(); ov.back(); refresh(); });
   const ok=$("ckOk"); if(ok) ok.onclick=()=>{ ISSUES=ISSUES.filter(i=>"i:"+i.id!==cid); saveIssues(); ov.back(); refresh(); }; }
@@ -1706,7 +1741,7 @@ $("forgetBtn").onclick=fromDrawer(()=>{ if(OUT.length){ showToast("Some changes 
     if(store.get("tok","")) call("logout").then(done,done); else done(); }); });
 function eye(){ $("eyeP").setAttribute("d",HIDE?"M3 3l18 18M10.6 6.1A9.8 9.8 0 0 1 12 6c6.4 0 10 6 10 6a17 17 0 0 1-3.2 3.9M6.6 6.6C3.9 8.3 2 12 2 12s3.6 6 10 6c1.6 0 3-.3 4.3-.9":"M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"); $("eyeBtn").setAttribute("aria-label",HIDE?"Show amounts":"Hide amounts"); }
 $("eyeBtn").onclick=()=>{ HIDE=!HIDE; store.set("hide",HIDE); eye(); refresh(); }; eye();
-function refresh(){ if(document.documentElement.classList.contains("locked")) return; build(); if(TAB_NOW==="ins") renderIns(); else renderHome(); paintBell(); if(isOpen($("drawer"))) buildDrawer(); if(SC&&isOpen($("scr"))) renderScr(); if(isOpen($("sheet"))) doSearch(); }
+function refresh(){ if(!PAINTED||document.documentElement.classList.contains("locked")) return; build(); if(TAB_NOW==="ins") renderIns(); else renderHome(); paintBell(); if(isOpen($("drawer"))) buildDrawer(); if(SC&&isOpen($("scr"))) renderScr(); if(isOpen($("sheet"))) doSearch(); }
 $("verTxt").textContent="Version "+APP_VERSION;
 /* update card: never pops over an open screen or entry; waits until you're back on Home */
 let UPD=null, updT=0;
@@ -1721,10 +1756,16 @@ async function checkUpdate(manual){ try{ const j=await (await fetch("version.jso
 async function doUpdate(){ $("updBtn").textContent="Updating…"; try{ const regs=await navigator.serviceWorker?.getRegistrations?.()||[]; await Promise.all(regs.map(r=>r.scope===new URL("./",location.href).href?r.unregister():null)); const ks=await caches.keys(); await Promise.all(ks.filter(k=>k.startsWith("artha-")&&k!=="artha-good").map(k=>caches.delete(k))); try{ sessionStorage.removeItem("arthaRolled"); }catch(e){} }catch(e){} location.replace(location.pathname+"?u="+Date.now()+location.hash); }
 $("updBtn").onclick=doUpdate; $("updLater").onclick=()=>{ if(UPD) store.set("updLater",UPD.v); clearTimeout(updT); $("upd").hidden=true; showToast("OK. Menu › Check for updates whenever you're ready"); };
 $("verBtn").onclick=()=>checkUpdate(true); setTimeout(checkUpdate,2500);
-document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="visible"){ checkUpdate(); refresh(); if(Date.now()-CACHE_AT>60000) pull(); } });
+let DAY_SEEN=new Date().toDateString();
+document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="visible"){ checkUpdate(); const day=new Date().toDateString(); if(day!==DAY_SEEN){ DAY_SEEN=day; refresh(); } /* a new day changes "due" items; otherwise nothing on screen is stale */ if(Date.now()-CACHE_AT>60000) pull(); } });
 if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(()=>{});
-S3.initBg($("bg3d")); { const a=ACC.find(x=>x[0]===store.get("acc","")); if(a) setTimeout(()=>S3.ringColor(a[2]),50); }
-build(); setTab(TAB_NOW); if(DATA) setSync(OUT.length?"warn":"",liveLine()); lockOnStart(); pull(); setTimeout(()=>refreshNavs(),1500);
+/* start-up order: the lock is decided first (index.html has already hidden the app if it will lock), the 3D layer loads meanwhile,
+   and the home is drawn exactly once: after the fingerprint when locked, straight away otherwise */
+function firstPaint(){ if(PAINTED) return; PAINTED=true; if(!S3.stub){ S3.initBg($("bg3d")); const a=ACC.find(x=>x[0]===store.get("acc","")); if(a) setTimeout(()=>S3.ringColor(a[2]),50); }
+  build(); setTab(TAB_NOW); if(DATA) setSync(OUT.length||FAILED.length?"warn":"",liveLine());
+  /* 3D arrived late (slow phone or first install): bring it in once, quietly */
+  if(S3.stub) load3D().then(ok=>{ if(!S3.stub){ S3.initBg($("bg3d")); if(ok) refresh(); } }); }
+load3D(); if(!lockOnStart()) soon3D(900).then(firstPaint); pull(); setTimeout(()=>refreshNavs(),1500);
 /* started fine: tell the boot guard (index.html), and let the worker keep this version as the last good one */
 window.__arthaOK=1; setTimeout(()=>{ try{ const c=navigator.serviceWorker&&navigator.serviceWorker.controller; if(c&&$("legend")&&$("app").offsetHeight) c.postMessage({t:"good",v:APP_VERSION}); }catch(e){} },4000);
 { const rb=store.get("rolled",null); if(rb!=null){ try{ localStorage.removeItem("artha:rolled"); }catch(e){} setTimeout(()=>showToast("The newest version didn't start, so Artha opened the last one that worked. Your data is fine.",7000),1200); } }

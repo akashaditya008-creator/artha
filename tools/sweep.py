@@ -40,6 +40,10 @@ REC = [
                    "Policy type": "Stand-alone own damage (two-wheeler)", "Add-ons": "Compulsory Personal Accident cover for owner-driver"}}],
     ["pterm:bike25", "pterm", {"pol": "pol:bike", "start": "2025-07-14", "end": "2026-07-13", "cover": "105000", "premium": "1600", "insurer": "Acko General Insurance"}],
     ["pol:health", "pol", {"title": "Family health cover", "type": "health", "insured": "Aditya, Spardha", "holder": "Aditya"}],
+    # a vehicle policy filed under Health by mistake: the bell must ask, and nothing may change by itself
+    ["pol:car", "pol", {"title": "Father's Creta", "type": "health", "insured": "Creta · TS09 AB 1234", "holder": "Father"}],
+    ["pterm:car26", "pterm", {"pol": "pol:car", "start": "2026-05-01", "end": "2027-04-30", "cover": "640000", "premium": "18200", "insurer": "Test General",
+        "fields": {"Registration no.": "TEST0001", "IDV": "6,40,000", "NCB": "35%"}}],
     ["inbox:1", "inbox", {"kind": "bond", "title": "Bond screenshots", "status": "new", "at": "2026-11-09T10:00", "files": []}],
 ]
 DATA = {"v": 3, "at": "2026-11-09T08:00:00.000Z", "url": "https://docs.google.com/x", "led": LED, "rec": REC, "files": "",
@@ -141,7 +145,18 @@ def main():
             if mode == "out": click('#aMode [data-m="out"]')
             for k in "500": click(f'#aPad [data-k="{k}"]')
             click("#aChoose"); pg.wait_for_timeout(300)
+        def rule(c, m):
+            print(("PASS " if c else "FAIL ") + m)
+            if not c: FAIL.append(m)
         close_all(); click("#tabIns"); pg.wait_for_timeout(300); click("#addBtn"); look("Add a policy")
+        rule(pg.evaluate("!document.querySelector('#fT [aria-pressed=\"true\"]') && !document.getElementById('fN')"), "new policy: no type is pre-selected and the form waits for the choice")
+        click('#fT [data-v="car"]'); look("Add a policy · car")
+        rule(pg.evaluate("!!document.getElementById('fN') && /vehicle/i.test(document.getElementById('eBox').innerText)"), "new policy: choosing Car shows the vehicle form")
+        close_all(); click("#bellBtn"); pg.wait_for_timeout(500)
+        txt = pg.evaluate("(document.getElementById('scrBody')||document.body).innerText")
+        rule("Creta: is this a Car policy?" in pg.evaluate("document.body.innerText"), "a vehicle policy filed under Health is asked about in the bell")
+        rule("Ola S1 Pro · own damage: is this" not in pg.evaluate("document.body.innerText") and "Family health cover: is this" not in pg.evaluate("document.body.innerText"), "correctly filed policies are not asked about")
+        rule(pg.evaluate("(()=>{const c=JSON.parse(localStorage.getItem('artha:outbox')||'[]');return !c.some(o=>JSON.stringify(o).includes('pol:car'));})()"), "no policy type is changed without a tap")
         close_all(); click("#tabInv"); pg.wait_for_timeout(300)
         start_add(); look("Add · what is it")
         for mode in ["in", "out"]:

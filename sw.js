@@ -1,10 +1,10 @@
-// Artha app shell (3.9).
+// Artha app shell (3.12).
 // · Network first, so a new version shows the moment it is published; the saved copy when offline.
 // · Every downloaded app file is checked (size + a marker) before it is used or saved, so a broken or empty
 //   file from the server is never shown: the last good copy is served instead.
 // · "artha-good" keeps the last version that started properly on this phone. If a new version fails to start,
 //   the page asks for a rollback and this worker serves that copy until the next update.
-const C="artha-v26", G="artha-good", META="artha-meta";
+const C="artha-v27", G="artha-good", META="artha-meta";
 const F=["./","index.html","app.css","app.js","scene.js","three.min.js","manifest.webmanifest","icon-192.png","icon-512.png"];
 const MIN={"./":4000,"index.html":4000,"app.js":60000,"app.css":20000,"scene.js":8000,"three.min.js":100000};
 const MARK={"./":'src="app.js',"index.html":'src="app.js',"app.js":"__arthaOK","scene.js":"Scene3D"};

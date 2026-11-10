@@ -54,10 +54,10 @@ ok(m is not None and set(m.group(1).split()) == set(hashes), f"CSP allows exactl
 
 # 4b. three.min.js is pinned by its integrity hash (refreshed by --fix)
 sri = "sha384-" + base64.b64encode(hashlib.sha384(open(os.path.join(ROOT, "three.min.js"), "rb").read()).digest()).decode()
-mi = re.search(r'<script src="three.min.js" integrity="([^"]+)"', idx)
+mi = re.search(r'<meta name="three-sri" content="([^"]+)"', idx)
 if "--fix" in sys.argv and mi and mi.group(1) != sri:
     idx = idx.replace(mi.group(1), sri); open(os.path.join(ROOT, "index.html"), "w", encoding="utf-8").write(idx)
-    mi = re.search(r'<script src="three.min.js" integrity="([^"]+)"', idx)
+    mi = re.search(r'<meta name="three-sri" content="([^"]+)"', idx)
 ok(mi is not None and mi.group(1) == sri, "three.min.js integrity hash matches the file")
 
 # 4c. no personal details in the public code (they come from the backend after sign-in)
@@ -140,6 +140,19 @@ with sync_playwright() as p:
     ok(pg.evaluate("window.__bio") == 1, "a reload after more than a minute away asks again")
     ok(pg.evaluate("getComputedStyle(document.documentElement).overscrollBehaviorY") in ("contain", "none"), "browser pull-to-refresh (full reload) is switched off")
     ok(not errs, "no JavaScript errors with the lock on" + ("" if not errs else ": " + errs[0][:160]))
+    ctx.close()
+    # start-up order: when the lock is on, nothing is drawn before the fingerprint, and the home is drawn once after it
+    ctx, pg, errs, csp = page()
+    pg.add_init_script("""localStorage.setItem('artha:bioId',JSON.stringify('AAAA'));window.__go=null;navigator.credentials.get=()=>new Promise(r=>{window.__go=()=>{const d=new Uint8Array(37);d[32]=5;r({response:{authenticatorData:d.buffer}});};});
+      window.__paints=0;document.addEventListener('DOMContentLoaded',()=>{new MutationObserver(m=>{ if(document.getElementById('legend').children.length) window.__paints++; }).observe(document.getElementById('legend'),{childList:true});});""")
+    pg.goto(f"http://127.0.0.1:{port}/index.html"); pg.wait_for_timeout(2500)
+    ok(pg.evaluate("getComputedStyle(document.getElementById('lock')).display")=="grid" and pg.evaluate("document.getElementById('legend').innerText.trim()")=="" and pg.evaluate("getComputedStyle(document.getElementById('app')).visibility")=="hidden", "locked open: only the lock screen is shown, no figures drawn underneath")
+    pg.evaluate("window.__go()"); pg.wait_for_timeout(3000)
+    n = pg.evaluate("window.__paints")
+    ok("₹" in pg.evaluate("document.getElementById('legend').innerText") and n == 1, f"after the fingerprint the home is drawn once ({n} time(s))")
+    pg.evaluate("window.__paints=0;document.dispatchEvent(new Event('visibilitychange'))"); pg.wait_for_timeout(1500)
+    ok(pg.evaluate("window.__paints") == 0, "coming back to the app with nothing changed redraws nothing")
+    ok(not errs, "no JavaScript errors on a locked open" + ("" if not errs else ": " + errs[0][:160]))
     ctx.close()
     ctx, pg, errs, csp = page(break_app=True)
     pg.wait_for_timeout(10500)

@@ -31,6 +31,7 @@ header.top{display:grid;grid-template-columns:44px 1fr auto;align-items:center;g
 .ib{position:relative;width:44px;height:44px;display:grid;place-items:center;border-radius:14px;color:var(--ink);transition:background .2s,transform .2s var(--spring)}
 .ib:active{transform:scale(.9)}
 .ib svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.brand{min-width:0}.brand p #syncTxt{min-width:0;overflow:hidden;text-overflow:ellipsis}
 .brand h1{margin:0;font:700 26px/1 var(--display);letter-spacing:-.04em;background:linear-gradient(90deg,var(--ink),var(--neon));-webkit-background-clip:text;background-clip:text;color:transparent}
 .brand p{margin:5px 0 0;font:500 11px var(--mono);color:var(--muted);display:flex;align-items:center;gap:6px;white-space:nowrap;overflow:hidden}
 .brand p .dot{width:6px;height:6px;border-radius:50%;background:var(--dim);flex:none}
@@ -602,6 +603,7 @@ html.homefit .lg{padding:8px 8px 7px}
 .lock button.alt{background:none;color:var(--muted);border:1px solid var(--line);font-size:14px;padding:11px}
 .lock .err{color:#FF8A9A;font-size:13px;min-height:18px}
 html.veil .app{filter:blur(18px)}
+html.prelock #lock{display:grid!important}
 html.locked .app,.locked .scr,.locked .sheet,.locked .add,.locked .esheet,.locked .drawer,.locked .scrim,.locked .upd,.locked .toast,.locked #bg3d{visibility:hidden}
 
 /* serial number on history rows */
