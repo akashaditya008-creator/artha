@@ -154,6 +154,19 @@ with sync_playwright() as p:
     ok(pg.evaluate("window.__paints") == 0, "coming back to the app with nothing changed redraws nothing")
     ok(not errs, "no JavaScript errors on a locked open" + ("" if not errs else ": " + errs[0][:160]))
     ctx.close()
+    # unchanged data: the phone sends the stamp it holds and the backend's short "same" answer redraws nothing
+    ctx, pg, errs, csp = page(data=dict(DATA, stamp="S1")); pg.wait_for_timeout(5000)
+    seen = []
+    def same(r):
+        body = json.loads(r.request.post_data or "{}"); seen.append((body.get("e") or {}).get("stamp"))
+        r.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": True, "d": {"v": 3, "same": True, "stamp": "S1", "at": "2026-11-10T08:00:00.000Z"}}))
+    pg.unroute("https://script.google.com/**"); pg.route("https://script.google.com/**", same)
+    pg.evaluate("window.__n=0;new MutationObserver(()=>window.__n++).observe(document.getElementById('legend'),{childList:true,subtree:true});localStorage.setItem('artha:cacheAt','1')")
+    pg.evaluate("dispatchEvent(new Event('online'))"); pg.wait_for_timeout(2500)
+    ok(seen and seen[-1] == "S1", f"sync sends the stamp of the copy it holds ({seen[-1:] })")
+    ok(pg.evaluate("window.__n") == 0 and "₹" in pg.evaluate("document.getElementById('legend').innerText") and pg.evaluate("+JSON.parse(localStorage.getItem('artha:cacheAt'))") > 1, "a 'same' answer keeps the figures, redraws nothing and updates the sync time")
+    ok(not errs, "no JavaScript errors on a 'same' answer" + ("" if not errs else ": " + errs[0][:160]))
+    ctx.close()
     ctx, pg, errs, csp = page(break_app=True)
     pg.wait_for_timeout(10500)
     ok(pg.evaluate("!!document.getElementById('bootFail')"), "a broken app.js shows the recovery screen, not a blank page")

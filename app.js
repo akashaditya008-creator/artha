@@ -1,7 +1,7 @@
 /* Artha 3.9 — investments + insurance. Data lives in the "Artha – My Investments" Google Sheet via the Apps Script API. */
 (()=>{
 "use strict";
-const APP_VERSION="3.12.0";
+const APP_VERSION="3.12.1";
 /* Personal details (banks, platforms, the Claude project link) come from the backend after sign-in, so this public code holds none. */
 const CFG=()=>(typeof DATA!=="undefined"&&DATA&&DATA.cfg)||{};
 const PROJECT_URL=()=>{ const u=safeUrl(CFG().project); return u==="#"?"https://claude.ai/projects":u; };
@@ -1447,7 +1447,9 @@ const liveLine=()=>`Synced ${fmtWhen(CACHE_AT)}`+(OUT.length?` · ${OUT.length} 
 /* the sheet copy is compared with the one already on screen (ignoring only the time it was sent), so an unchanged sync redraws nothing */
 const dataKey=d=>{ try{ return JSON.stringify(d,(k,v)=>k==="at"?undefined:v); }catch(e){ return ""; } };
 const sameData=(a,b)=>!!(a&&b&&PAINTED&&dataKey(a)===dataKey(b));
-function applyData(d){ if(!d) return; if(d.v!==3){ DATA=d; refresh(); setSync("warn","Paste the new Artha backend (v3) and run setupV3() to see your data"); return; }
+function applyData(d){ if(!d) return;
+  if(d.same){ if(!DATA) return; CACHE_AT=Date.now(); store.set("cacheAt",CACHE_AT); setSync(OUT.length||FAILED.length?"warn":"live",liveLine()); return; }
+  if(d.v!==3){ DATA=d; refresh(); setSync("warn","Paste the new Artha backend (v3) and run setupV3() to see your data"); return; }
   const prev=DATA, same=sameData(prev,d); DATA=d; CACHE_AT=Date.now(); store.set("cacheAt",CACHE_AT); if(!same){ store.set("cache",d); refresh(); } setSync(OUT.length||FAILED.length?"warn":"live",liveLine()); refreshNavs();
   reconcile(d,prev).catch(()=>{}); }
 function errText(e){ const m=String(e&&e.message||e||"");
@@ -1469,7 +1471,8 @@ function flush(){ if(flushing||!PW()||!API()||!OUT.length) return;
 addEventListener("online",()=>{ flush(); pull(); });
 function pull(){ if(loading) return Promise.resolve(); if(!API()){ askPass(null,true); return Promise.resolve(); } if(!PW()){ askPass(); return Promise.resolve(); } flush(); loading=true;
   setSync("busy",DATA?`Synced ${fmtWhen(CACHE_AT)} · updating…`:"Loading your sheet…");
-  return call("get").then(d=>{ loading=false; applyData(d); flush(); },e=>{ loading=false; const m=errText(e);
+  /* the backend answers with a few bytes ("same") when nothing changed since the copy this phone holds */
+  return call("get",{e:{stamp:(DATA&&DATA.stamp)||""}}).then(d=>{ loading=false; applyData(d); flush(); },e=>{ loading=false; const m=errText(e);
     setSync("warn",e&&e.net&&DATA?`Offline · copy from ${fmtWhen(CACHE_AT)}`:m); }); }
 /* ---------- sign in with Google: the backend checks the account and gives this phone its own session key ---------- */
 const CLIENT_ID="816088287548-9r600bocno2f00uf2p319cdg0f8bcov7.apps.googleusercontent.com";

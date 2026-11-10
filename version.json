@@ -1,1 +1,1 @@
-{"v": "3.12.0", "note": "Opens faster: the lock comes first and the home is drawn once, insurance: choose the type first and fix policies filed under the wrong type"}
+{"v": "3.12.1", "note": "Faster sync: when nothing changed in the sheet, only a few bytes are fetched"}
