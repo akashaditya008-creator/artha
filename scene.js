@@ -18,93 +18,40 @@ S.scroll=y=>{ scrollK=Math.min(1,y/900); };
 /* the background leans toward every tap and rushes forward for a moment (more on a save or a new screen) */
 let boost=0; S.pulse=k=>{ boost=Math.min(2.4,boost+(k||1)); };
 addEventListener("pointerdown",e=>{ pointer.tx=(e.clientX/innerWidth-.5)*2; pointer.ty=(e.clientY/innerHeight-.5)*2; boost=Math.min(2.4,boost+.18); },{passive:true});
-S.theme=name=>{ if(!webgl) return; tgtCol=new T.Color(THEME[name]||THEME.home); };
+S.theme=name=>{ if(typeof hexOf==="function") bgHex=hexOf(THEME[name]||THEME.home); if(webgl) tgtCol=new T.Color(THEME[name]||THEME.home); };
 
-/* ---------- floating line-art: space and markets ---------- */
-function art(kind){ const c=document.createElement("canvas"); c.width=c.height=256; const g=c.getContext("2d");
-  g.strokeStyle="#fff"; g.fillStyle="#fff"; g.lineWidth=5; g.lineCap="round"; g.lineJoin="round";
-  const ring=(x,y,r)=>{ g.beginPath(); g.arc(x,y,r,0,Math.PI*2); g.stroke(); };
-  if(kind==="planet"){ ring(128,128,52); g.save(); g.translate(128,128); g.rotate(-.35); g.beginPath(); g.ellipse(0,0,108,26,0,Math.PI*.06,Math.PI*.94,true); g.stroke(); g.restore();
-    g.globalAlpha=.5; g.beginPath(); g.arc(128,128,36,Math.PI*1.1,Math.PI*1.6); g.stroke(); }
-  else if(kind==="moon"){ g.beginPath(); g.arc(128,128,70,Math.PI*.5,Math.PI*1.5); g.arc(150,128,58,Math.PI*1.38,Math.PI*.62,true); g.closePath(); g.stroke();
-    g.globalAlpha=.6; [[118,96,7],[100,150,10],[132,176,5]].forEach(([x,y,r])=>ring(x,y,r)); }
-  else if(kind==="galaxy"){ g.lineWidth=0; for(let i=0;i<520;i++){ const arm=i%2, t=Math.random()*3.4, r=8+t*30, a=t*1.9+arm*Math.PI+(Math.random()-.5)*.55;
-      g.globalAlpha=.25+Math.random()*.75*(1-t/3.6); g.beginPath(); g.arc(128+Math.cos(a)*r,128+Math.sin(a)*r*.62,Math.random()*2.4+.6,0,Math.PI*2); g.fill(); }
-    g.globalAlpha=1; g.beginPath(); g.arc(128,128,9,0,Math.PI*2); g.fill(); }
-  else if(kind==="comet"){ const gr=g.createLinearGradient(30,210,190,60); gr.addColorStop(0,"rgba(255,255,255,0)"); gr.addColorStop(1,"#fff"); g.strokeStyle=gr;
-    [-10,0,10].forEach(o=>{ g.beginPath(); g.moveTo(40+o,214-o); g.lineTo(184,72); g.stroke(); }); g.beginPath(); g.arc(190,66,14,0,Math.PI*2); g.fill(); }
-  else if(kind==="stars"){ const P=[[40,190],[86,132],[132,150],[176,92],[214,60],[150,206]]; g.lineWidth=3; g.globalAlpha=.7; g.beginPath(); P.slice(0,5).forEach(([x,y],i)=>i?g.lineTo(x,y):g.moveTo(x,y)); g.moveTo(132,150); g.lineTo(150,206); g.stroke();
-    g.globalAlpha=1; P.forEach(([x,y],i)=>{ g.beginPath(); g.arc(x,y,i===3?9:6,0,Math.PI*2); g.fill(); }); }
-  else if(kind==="candles"){ const C=[[30,150,120,170,100],[70,130,100,160,80],[110,120,70,140,60],[150,90,60,120,40],[190,70,30,90,20],[230,50,20,70,10]];
-    C.forEach(([x,o,c,lo,hi],i)=>{ g.globalAlpha=i===2?.55:1; g.beginPath(); g.moveTo(x,hi+20); g.lineTo(x,lo+50); g.stroke(); const y0=Math.min(o,c)+30, h=Math.abs(o-c)+10; i===2?g.strokeRect(x-12,y0,24,h):g.fillRect(x-12,y0,24,h); }); }
-  else if(kind==="trend"){ g.lineWidth=6; g.beginPath(); [[20,210],[70,170],[105,186],[150,120],[180,138],[226,60]].forEach(([x,y],i)=>i?g.lineTo(x,y):g.moveTo(x,y)); g.stroke();
-    g.beginPath(); g.moveTo(196,58); g.lineTo(228,56); g.lineTo(224,90); g.stroke(); g.globalAlpha=.35; g.lineWidth=3; g.beginPath(); g.moveTo(16,232); g.lineTo(240,232); g.moveTo(16,232); g.lineTo(16,30); g.stroke(); }
-  else if(kind==="bars"){ [70,110,95,150,185].forEach((h,i)=>{ g.globalAlpha=.45+i*.13; g.fillRect(34+i*40,226-h,24,h); }); }
-  else if(kind==="rupee"){ ring(128,128,96); g.lineWidth=12; g.beginPath(); g.moveTo(84,74); g.lineTo(172,74); g.moveTo(84,104); g.lineTo(172,104); g.moveTo(98,74);
-    g.bezierCurveTo(176,74,176,136,98,136); g.lineTo(160,190); g.stroke(); }
-  else if(kind==="pie"){ ring(128,128,84); g.beginPath(); g.moveTo(128,128); g.lineTo(128,44); g.moveTo(128,128); g.lineTo(200,170); g.moveTo(128,128); g.lineTo(52,166); g.stroke();
-    g.globalAlpha=.4; g.beginPath(); g.moveTo(128,128); g.arc(128,128,84,-Math.PI/2,Math.PI*.17); g.closePath(); g.fill(); }
-  else if(kind==="sun"){ ring(128,128,40); g.globalAlpha=.8; for(let i=0;i<12;i++){ const a=i/12*Math.PI*2, r0=56, r1=i%2?78:92; g.beginPath(); g.moveTo(128+Math.cos(a)*r0,128+Math.sin(a)*r0); g.lineTo(128+Math.cos(a)*r1,128+Math.sin(a)*r1); g.stroke(); } }
-  else if(kind==="saturn"){ ring(128,128,40); g.save(); g.translate(128,128); g.rotate(.4); g.beginPath(); g.ellipse(0,0,100,22,0,0,Math.PI*2); g.stroke(); g.globalAlpha=.5; g.beginPath(); g.ellipse(0,0,84,16,0,0,Math.PI*2); g.stroke(); g.restore(); }
-  else if(kind==="orbit"){ g.beginPath(); g.arc(128,128,10,0,Math.PI*2); g.fill(); g.lineWidth=3.5; [0,1,2].forEach(k=>{ g.save(); g.translate(128,128); g.rotate(k*Math.PI/3); g.beginPath(); g.ellipse(0,0,96,32,0,0,Math.PI*2); g.stroke(); g.restore(); });
-    [[214,128],[80,58],[86,204]].forEach(([x,y])=>{ g.beginPath(); g.arc(x,y,7,0,Math.PI*2); g.fill(); }); }
-  else if(kind==="nebula"){ g.lineWidth=0; for(let i=0;i<380;i++){ const a=Math.random()*Math.PI*2, r=Math.pow(Math.random(),.7)*100; g.globalAlpha=.15+Math.random()*.6*(1-r/110); g.beginPath(); g.arc(128+Math.cos(a)*r,128+Math.sin(a)*r*.7,Math.random()*2+.5,0,Math.PI*2); g.fill(); } }
-  else if(kind==="asteroid"){ g.beginPath(); [[70,96],[112,62],[170,74],[198,124],[176,182],[116,196],[66,160]].forEach(([x,y],i)=>i?g.lineTo(x,y):g.moveTo(x,y)); g.closePath(); g.stroke(); g.globalAlpha=.55; ring(118,112,13); ring(160,150,9); ring(104,164,7); }
-  else if(kind==="area"){ const P=[[16,200],[56,170],[92,182],[128,130],[164,144],[200,92],[240,70]]; g.lineWidth=5; g.beginPath(); P.forEach(([x,y],i)=>i?g.lineTo(x,y):g.moveTo(x,y)); g.stroke();
-    g.globalAlpha=.22; g.lineTo(240,236); g.lineTo(16,236); g.closePath(); g.fill(); g.globalAlpha=.4; g.lineWidth=2; [80,140,200].forEach(y=>{ g.beginPath(); g.moveTo(16,y); g.lineTo(240,y); g.stroke(); }); }
-  else if(kind==="coins"){ [0,1,2,3].forEach(k=>{ g.globalAlpha=1-k*.15; g.beginPath(); g.ellipse(128,190-k*30,62,16,0,0,Math.PI*2); g.stroke(); g.beginPath(); g.moveTo(66,190-k*30); g.lineTo(66,204-k*30); g.moveTo(190,190-k*30); g.lineTo(190,204-k*30); g.stroke(); }); }
-  const t=new T.CanvasTexture(c); t.needsUpdate=true; return t; }
-
-/* ---------- background ---------- */
-let BG=null;
-S.initBg=function(canvas){
-  if(!webgl){ canvas.remove(); return; }
-  const r=new T.WebGLRenderer({canvas,antialias:false,alpha:true,powerPreference:"low-power"});
-  r.setPixelRatio(Math.min(1.5,devicePixelRatio||1));
-  const scene=new T.Scene(), cam=new T.PerspectiveCamera(58,1,.1,220);
-  scene.fog=new T.FogExp2(0x04070c,.05); cam.position.set(0,1.6,9);
-  const col=new T.Color(THEME.home);
-  const grid=new T.GridHelper(160,80,col,col); grid.material.transparent=true; grid.material.opacity=.16; grid.position.y=-3; scene.add(grid);
-  const grid2=new T.GridHelper(160,80,col,col); grid2.material=grid.material; grid2.position.y=9; scene.add(grid2);
-  const N=900, g=new T.BufferGeometry(), p=new Float32Array(N*3);
-  for(let i=0;i<N;i++){ p[i*3]=(Math.random()-.5)*60; p[i*3+1]=(Math.random()-.4)*24; p[i*3+2]=-Math.random()*70+6; }
-  g.setAttribute("position",new T.BufferAttribute(p,3));
-  const dust=new T.Points(g,new T.PointsMaterial({color:col,size:.07,transparent:true,opacity:.75,blending:T.AdditiveBlending,depthWrite:false})); scene.add(dust);
-  /* wireframe solids at several depths (near ones drift past the edges of the screen) */
-  const SOL=[[T.IcosahedronGeometry,[1.1,0],-5,2.5,-8],[T.OctahedronGeometry,[.8,0],5.5,-.5,-10],[T.TorusKnotGeometry,[.6,.16,64,8],-4,-1.8,-14],[T.IcosahedronGeometry,[.7,0],4.5,3.6,-18],
-    [T.TorusGeometry,[.9,.06,8,40],-6.5,4.6,-12],[T.DodecahedronGeometry,[.6,0],6.8,2.2,-7],[T.TetrahedronGeometry,[.7,0],-2.2,5.2,-20],[T.CylinderGeometry,[.5,.5,.14,24],2.4,-2.2,-9],
-    [T.BoxGeometry,[.8,.8,.8],-7.5,-.6,-16],[T.TorusGeometry,[.5,.05,8,32],.8,4.4,-11],[T.CylinderGeometry,[.36,.36,.1,20],-3.2,3.4,-6],[T.OctahedronGeometry,[.45,0],3.6,5,-13]];
-  const solids=[]; SOL.forEach(([G,a,x,y,z])=>{ if(!G) return;
-    const m=new T.Mesh(new G(...a),new T.MeshBasicMaterial({color:col,wireframe:true,transparent:true,opacity:.2}));
-    m.position.set(x,y,z); m.userData.s=.12+Math.random()*.2; m.userData.y=y; scene.add(m); solids.push(m); });
-  /* drifting space + market line-art, kept faint so the numbers stay readable */
-  const KINDS=["planet","candles","galaxy","trend","moon","rupee","stars","bars","comet","pie","sun","area","orbit","nebula","coins","saturn","candles","stars","trend","asteroid","galaxy","bars","comet","area","rupee","coins","pie","orbit","planet","trend","coins","rupee","bars","moon"], arts=[];
-  KINDS.forEach((k,i)=>{ const mat=new T.SpriteMaterial({map:art(k),color:col,transparent:true,opacity:0,depthWrite:false,blending:T.AdditiveBlending});
-    const s=new T.Sprite(mat), z=-7-((i*7.3)%24), sz=1.6+((i*1.37)%1.8);
-    s.position.set(((i*5.1+i*i*.37)%20)-10,((i*3.7+i*.9)%9.6)-2.6,z); s.scale.set(sz,sz,1);
-    s.userData={vx:(((i*13)%7)-3)*.035,vy:(((i*11)%5)-2)*.02,vr:(((i*17)%9)-4)*.012,o:.11+((i*7)%5)*.025,ph:i*1.3};
-    scene.add(s); arts.push(s); });
-  BG={r,scene,cam,grid,grid2,dust,solids,arts,col};
-  const size=()=>{ r.setSize(innerWidth,innerHeight,false); cam.aspect=innerWidth/innerHeight; cam.updateProjectionMatrix(); };
-  size(); addEventListener("resize",size);
-  let last=performance.now();
-  const loop=now=>{ requestAnimationFrame(loop); if(document.hidden||document.documentElement.classList.contains("calm")) return;
-    const dt=Math.min(.05,(now-last)/1000); last=now; const calm=S.calm(), sp=calm?0:1;
-    BG.col.lerp(tgtCol,.04); grid.material.color.copy(BG.col); dust.material.color.copy(BG.col); solids.forEach(m=>m.material.color.copy(BG.col));
-    boost*=Math.pow(.02,dt); if(boost<.004) boost=0; const warp=1+boost*7;
-    grid.position.z=(grid.position.z+dt*.9*sp*warp)%2; grid2.position.z=grid.position.z; grid.material.opacity=.16+Math.min(.2,boost*.12);
-    dust.rotation.y+=dt*.012*sp; dust.position.z=(dust.position.z+dt*.6*sp*warp)%20;
-    solids.forEach((m,i)=>{ m.rotation.x+=dt*m.userData.s*sp; m.rotation.y+=dt*m.userData.s*.8*sp; m.position.y+=Math.sin(now/1600+i)*.002*sp; m.material.opacity=.2+Math.min(.35,boost*.2); });
-    arts.forEach(s=>{ const u=s.userData; s.material.color.copy(BG.col);
-      s.position.x+=u.vx*dt*sp; s.position.y+=(u.vy*dt+Math.sin(now/2600+u.ph)*.0016)*sp; s.material.rotation+=u.vr*dt*sp;
-      if(s.position.x>11) s.position.x=-11; if(s.position.x<-11) s.position.x=11; if(s.position.y>7) s.position.y=-3; if(s.position.y<-3.2) s.position.y=7;
-      const tw=u.o*(.75+.25*Math.sin(now/3200+u.ph)); s.material.opacity+=(tw-s.material.opacity)*.02; });
-    const tx=tilt?tilt.x:pointer.tx, ty=tilt?tilt.y:pointer.ty;
-    pointer.x+=(tx-pointer.x)*.04; pointer.y+=(ty-pointer.y)*.04;
-    cam.position.x=pointer.x*.9; cam.position.y=1.6-pointer.y*.5-scrollK*2.2; cam.position.z=9-Math.min(1.6,boost*.8); cam.lookAt(0,-scrollK*1.5,-6);
-    r.render(scene,cam); };
-  requestAnimationFrame(loop);
-};
+/* ---------- background: line-art at three depths over a floor grid. Plain 2D canvas, about 30 frames a second, asleep when the
+   app is hidden or in "Simple and still". (The full WebGL scene that was here made every screen heavy on phones.) ---------- */
+const hexOf=n=>"#"+("00000"+n.toString(16)).slice(-6); let bgHex=hexOf(THEME.home), bgOn=false;
+S.initBg=function(c){ if(bgOn||!c||!c.getContext) return; const g=c.getContext("2d"); if(!g){ c.remove(); return; } bgOn=true;
+  let W=0,H=0,last=0,z0=0,clear=false;
+  const KIND=["coin","ring","cube","bars","rupee","tri","candle","ring","coin","cube","planet"], O=Array.from({length:24},(_,i)=>({k:KIND[i%KIND.length],x:(i*0.618)%1,y:(i*0.377+.08)%1,d:.35+((i*7)%10)/10*.9,r:i*1.3,vr:(((i*5)%7)-3)*.05,vx:(((i*3)%5)-2)*.004,vy:(((i*11)%7)-3)*.003,ph:i*1.7}));
+  const ST=Array.from({length:80},(_,i)=>({x:(i*0.731)%1,y:(i*0.419)%1,d:.3+((i*13)%10)/10}));
+  const size=()=>{ const dpr=Math.min(1.5,devicePixelRatio||1); W=innerWidth; H=innerHeight; c.width=W*dpr; c.height=H*dpr; g.setTransform(dpr,0,0,dpr,0,0); };
+  function shape(o,s){ g.beginPath();
+    if(o.k==="coin"){ g.ellipse(0,0,s,s*.42,0,0,6.283); g.moveTo(-s,0); g.lineTo(-s,s*.3); g.ellipse(0,s*.3,s,s*.42,0,3.1416,0,true); g.lineTo(s,0); }
+    else if(o.k==="ring"){ g.arc(0,0,s,0,6.283); g.moveTo(s*.6,0); g.arc(0,0,s*.6,0,6.283); }
+    else if(o.k==="cube"){ const a=s*.8; g.rect(-a,-a,a*1.6,a*1.6); g.moveTo(-a,-a); g.lineTo(-a*.4,-a*1.5); g.lineTo(a*1.2,-a*1.5); g.lineTo(a*.6,-a); g.moveTo(a*1.2,-a*1.5); g.lineTo(a*1.2,a*.1); g.lineTo(a*.6,a*.6); }
+    else if(o.k==="bars"){ [.5,.9,.7,1.25].forEach((h,i)=>g.rect(-s+i*s*.55,s-h*s*1.4,s*.34,h*s*1.4)); }
+    else if(o.k==="rupee"){ g.arc(0,0,s,0,6.283); g.moveTo(-s*.4,-s*.5); g.lineTo(s*.42,-s*.5); g.moveTo(-s*.4,-s*.2); g.lineTo(s*.42,-s*.2); g.moveTo(-s*.25,-s*.5); g.bezierCurveTo(s*.5,-s*.5,s*.5,s*.1,-s*.25,s*.1); g.lineTo(s*.3,s*.6); }
+    else if(o.k==="tri"){ g.moveTo(0,-s); g.lineTo(s*.95,s*.7); g.lineTo(-s*.95,s*.7); g.closePath(); }
+    else if(o.k==="planet"){ g.arc(0,0,s*.6,0,6.283); g.moveTo(s*1.3,0); g.ellipse(0,0,s*1.3,s*.34,0,0,6.283); }
+    else { [[-.7,.2,.5],[-.2,-.3,.7],[.3,0,.4],[.8,-.6,.6]].forEach(([x,y,h])=>{ g.moveTo(x*s,(y-h)*s); g.lineTo(x*s,(y+h)*s); g.rect(x*s-s*.14,(y-h*.5)*s,s*.28,h*s); }); }
+    g.stroke(); }
+  const loop=now=>{ requestAnimationFrame(loop); if(document.hidden||document.documentElement.classList.contains("calm")||document.documentElement.classList.contains("locked")){ if(!clear){ g.clearRect(0,0,W,H); clear=true; } return; }
+    if(now-last<32) return; const dt=Math.min(.06,(now-last)/1000); last=now; clear=false;
+    boost*=Math.pow(.03,dt); if(boost<.004) boost=0;
+    const tx=tilt?tilt.x:pointer.tx, ty=tilt?tilt.y:pointer.ty; pointer.x+=(tx-pointer.x)*.08; pointer.y+=(ty-pointer.y)*.08; const px=pointer.x, py=pointer.y;
+    g.clearRect(0,0,W,H); g.strokeStyle=bgHex; g.fillStyle=bgHex; g.lineJoin="round"; g.lineCap="round";
+    const hz=H*.56-scrollK*60, vx=W/2+px*26; z0=(z0+dt*(.2+boost*1.6))%1; g.lineWidth=1; g.globalAlpha=.14+Math.min(.14,boost*.09);
+    g.beginPath(); for(let i=-9;i<=9;i++){ g.moveTo(vx+i*14,hz); g.lineTo(vx+i*W*.42,H+10); }
+    for(let k=0;k<9;k++){ const t=(k+z0)/9, y=hz+(H-hz)*t*t; g.moveTo(0,y); g.lineTo(W,y); } g.stroke();
+    ST.forEach(s=>{ g.globalAlpha=.25+.45*s.d; g.fillRect((s.x*W+px*18*s.d+W)%W,s.y*hz*1.05,1.4*s.d,1.4*s.d); });
+    O.forEach(o=>{ o.x=(o.x+o.vx*dt*(1+boost*3)+1)%1; o.y=(o.y+o.vy*dt+1)%1; o.r+=o.vr*dt;
+      const s=9+o.d*14, x=o.x*(W+80)-40+px*34*o.d, y=o.y*(H*.92)+Math.sin(now/2400+o.ph)*5-py*20*o.d;
+      g.save(); g.translate(x,y); g.rotate(o.r); g.globalAlpha=(.13+.15*o.d)*(1+Math.min(.8,boost*.5)); g.lineWidth=1+o.d*.8; shape(o,s); g.restore(); });
+    g.globalAlpha=1; };
+  size(); addEventListener("resize",size); requestAnimationFrame(loop); };
 
 /* ---------- 3D ring ---------- */
 let RG=null;
@@ -134,7 +81,7 @@ S.ring=function(host,segs,cb){
     const halo=new T.Mesh(new T.TorusGeometry(2.55,.012,8,160),new T.MeshBasicMaterial({color:0x3CF0D4,transparent:true,opacity:.55})); root.add(halo);
     const halo2=new T.Mesh(new T.TorusGeometry(1.08,.008,8,120),new T.MeshBasicMaterial({color:0x3CF0D4,transparent:true,opacity:.35})); root.add(halo2);
     const og=new T.BufferGeometry(), on=60, op=new Float32Array(on*3); for(let i=0;i<on;i++){ const a=i/on*Math.PI*2; op[i*3]=Math.cos(a)*2.9; op[i*3+1]=Math.sin(a)*2.9; op[i*3+2]=(Math.random()-.5)*.25; }
-    og.setAttribute("position",new T.BufferAttribute(op,3)); const orbit=new T.Points(og,new T.PointsMaterial({color:0x3CF0D4,size:.06,transparent:true,opacity:.8,blending:T.AdditiveBlending})); root.add(orbit);
+    og.setAttribute("position",new T.BufferAttribute(op,3)); const orbit=new T.Points(og,new T.PointsMaterial({color:0x3CF0D4,size:.06,transparent:true,opacity:.8,blending:T.AdditiveBlending})); root.add(orbit); halo.visible=halo2.visible=orbit.visible=false;   // the thin outline circles around and inside the ring are gone
     RG={host,c,lab,rst,r,scene,cam,root,spin,halo,halo2,orbit,meshes:[],labs:new Map(),key:"",dead:false,cb:cb||{},
       th:0,w:.12,ph:TILT0,pv:0,rest:TILT0,user:false,yaw:0,drag:null,pop:null,zoom:0,t0:0,W:320,H:236};
     const size=()=>{ const w=host.clientWidth||320, hh=host.clientHeight, h=hh>120?hh:Math.round(w*.8); RG.W=w; RG.H=h; r.setSize(w,h,false); c.style.width=w+"px"; c.style.height=h+"px"; cam.aspect=w/h; cam.updateProjectionMatrix(); RG.dist=Math.max(8.4,3.15/(Math.tan(18*Math.PI/180)*cam.aspect)); };
@@ -176,7 +123,7 @@ S.ring=function(host,segs,cb){
           const m=RG.meshes.find(x=>x.userData.c===RG.pop); if(m){ const err=wrapPi(RG.th-(-Math.PI/2-m.userData.mid)), k=34;
             RG.w+=(-k*err-2*Math.sqrt(k)*RG.w)*dt; RG.th+=RG.w*dt; } }
         else { /* flywheel: viscous bearing pulls the speed toward a slow idle drift (none in calm mode) */
-          const w0=calm||RG.user?0:.12, c0=RG.user?1.6:.55; RG.w=w0+(RG.w-w0)*Math.exp(-c0*dt); if(Math.abs(RG.w-w0)<.002) RG.w=w0; RG.th+=RG.w*dt; }
+          const w0=0, c0=RG.user?1.6:.9; RG.w=w0+(RG.w-w0)*Math.exp(-c0*dt); if(Math.abs(RG.w-w0)<.002) RG.w=w0; RG.th+=RG.w*dt; }
         /* tilt: damped spring back to rest, a touch under-damped so a push wobbles once */
         const kt=38, ct=7.2; RG.pv+=(-kt*(RG.ph-RG.rest)-ct*RG.pv)*dt; RG.ph+=RG.pv*dt; }
       RG.spin.rotation.z=RG.th;
@@ -192,7 +139,10 @@ S.ring=function(host,segs,cb){
         u.o+=((dim?.22:.96)-u.o)*(1-Math.exp(-8*dt)); u.f+=((on?1:0)-u.f)*(1-Math.exp(-7*dt));
         const out=.42*u.f, s=(.6+.4*e)*(1+.05*u.f);
         m.scale.set(s,s,Math.max(.001,e)*(1+.35*u.f)); m.position.set(Math.cos(u.mid)*out,Math.sin(u.mid)*out,.28*u.f);
-        m.material.opacity=u.o; m.material.emissiveIntensity=.28+(calm?0:.12*Math.sin(now/900+i))+.45*u.f; });
+        m.material.opacity=u.o; m.material.emissiveIntensity=.3+.45*u.f; });
+      /* draw only when the ring has moved (it rests when untouched, so an idle screen costs nothing) */
+      const sig=RG.th.toFixed(3)+"|"+RG.root.rotation.x.toFixed(2)+"|"+RG.root.rotation.y.toFixed(2)+"|"+z.toFixed(3)+"|"+RG.meshes.map(m=>m.userData.f.toFixed(2)+m.userData.o.toFixed(2)+m.scale.z.toFixed(2)).join("")+"|"+c.clientWidth;
+      if(sig===RG.sig&&now-(RG.lr||0)<1500) return; RG.sig=sig; RG.lr=now;
       RG.r.render(RG.scene,RG.cam);
       placeLabels(); };
     requestAnimationFrame(loop);

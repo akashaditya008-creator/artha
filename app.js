@@ -1,7 +1,7 @@
 /* Artha 3.9 — investments + insurance. Data lives in the "Artha – My Investments" Google Sheet via the Apps Script API. */
 (()=>{
 "use strict";
-const APP_VERSION="3.13.0";
+const APP_VERSION="3.13.1";
 /* Personal details (banks, platforms, the Claude project link) come from the backend after sign-in, so this public code holds none. */
 const CFG=()=>(typeof DATA!=="undefined"&&DATA&&DATA.cfg)||{};
 const PROJECT_URL=()=>{ const u=safeUrl(CFG().project); return u==="#"?"https://claude.ai/projects":u; };
@@ -19,7 +19,7 @@ let ready3D=null;
 function load3D(){ if(ready3D) return ready3D; const one=(src,sri)=>new Promise(res=>{ const s=document.createElement("script"); s.src=src; if(sri) s.integrity=sri; s.onload=()=>res(true); s.onerror=()=>res(false); document.head.appendChild(s); });
   const sri=(document.querySelector('meta[name="three-sri"]')||{}).content||"";
   return ready3D=one("three.min.js",sri).then(()=>one("scene.js?v="+APP_VERSION)).then(()=>{ if(window.Scene3D) S3=window.Scene3D; else { const c=$("bg3d"); if(c) c.remove(); } return S3.ok; },()=>false); }
-const soon3D=ms=>Promise.race([load3D(),new Promise(r=>setTimeout(r,ms))]);
+const idle=fn=>window.requestIdleCallback?requestIdleCallback(fn,{timeout:1500}):setTimeout(fn,350);
 
 /* ---------- endpoint (only from the private setup link) ---------- */
 function takeLink(s){ const m=/[#&?]k=([\w-]{20,})/.exec(s||"")||/\/macros\/s\/([\w-]{20,})\//.exec(s||""); if(!m) return false; store.set("api","https://script.google.com/macros/s/"+m[1]+"/exec"); return true; }
@@ -357,6 +357,7 @@ const RINGCB={onPop:c=>ringPop(c),onOpen:c=>openScr(c),onSwipe:d=>setFace(FACE+d
 function ringLabels(T){ const st=$("stage"); if(S3.ok&&!calm()&&st.querySelector("canvas.ring3d")) S3.ring(st,ringSegs(T||totals()),RINGCB); }
 function drawRing(){ const T=totals(), st=$("stage"), G=T.G.filter(x=>x.r.cur>0);
   const use3d=S3.ok&&!calm(); st.classList.toggle("flatmode",!use3d);
+  if(S3.stub&&!calm()){ st.classList.add("pend"); setTimeout(()=>st.classList.remove("pend"),3500); }   // the 3D ring is on its way: no flash of the flat one
   const fl=st.querySelector("svg.flat"); if(fl) fl.remove();
   if(use3d) S3.ring(st,ringSegs(T),RINGCB);
   else { st.insertAdjacentHTML("beforeend",flatRing(G)); st.querySelectorAll("svg.flat [data-c]").forEach(n=>n.onclick=()=>openScr(n.dataset.c)); }
@@ -1040,7 +1041,7 @@ function polEnd(p){ if(p.d.link==="term"){ const np=nextPremium(M.term); return 
 function renewals(n){ return policies().map(p=>{ const end=p.d.link==="term"?"":polEnd(p); return end?{pol:p,end,left:days(M.today,end)}:null; }).filter(x=>x&&x.left<=n).sort((a,b)=>a.left-b.left); }
 let INSF=store.get("insf","all");
 function dring(left,total,col){ const k=total>0?Math.max(0,Math.min(1,left/total)):0, R=19, C=2*Math.PI*R;
-  return `<svg class="dring" viewBox="0 0 46 46"><circle cx="23" cy="23" r="${R}" stroke="rgba(255,255,255,.08)"/><circle cx="23" cy="23" r="${R}" stroke="${col}" stroke-dasharray="${C*k} ${C}" transform="rotate(-90 23 23)" stroke-linecap="round" style="filter:drop-shadow(0 0 4px ${col})"/><text x="23" y="27" text-anchor="middle">${left<0?"!":left>999?"∞":left}</text></svg>`; }
+  return `<svg class="dring" viewBox="0 0 46 46"><circle cx="23" cy="23" r="${R}" stroke="rgba(255,255,255,.08)"/><circle cx="23" cy="23" r="${R}" stroke="${col}" stroke-dasharray="${C*k} ${C}" transform="rotate(-90 23 23)" stroke-linecap="round" style="filter:drop-shadow(0 0 4px ${col})"/><text x="23" y="27" text-anchor="middle"${left>999?' style="font-size:9px"':""}>${left<0?"!":left}</text></svg>`; }
 function renderIns(){ const el=$("viewIns"); if(!M) return; const P=policies();
   const rows=P.map(p=>{ const c=p.d.link==="term"?null:currentTerm(p.id), end=polEnd(p), left=end?days(M.today,end):null, total=c&&c.d.start&&c.d.end?days(c.d.start,c.d.end):365;
     return {p,c,end,left,total,cover:c?+c.d.cover||0:0,prem:c?+c.d.premium||0:0}; }).sort((a,b)=>(a.left==null?9e9:a.left)-(b.left==null?9e9:b.left));
@@ -1544,7 +1545,7 @@ const LOCK={ locked:false, hiddenAt:0, AFTER:60000,
   /* a pull-to-refresh or reload in the same session, within a minute of last use, does not ask again; a fresh open always does */
   seen(t){ try{ if(t) sessionStorage.setItem("arthaSeen",String(t)); else sessionStorage.removeItem("arthaSeen"); }catch(e){} },
   recent(){ try{ const t=+sessionStorage.getItem("arthaSeen")||0; return t>0&&Date.now()-t<LOCK.AFTER; }catch(e){ return false; } },
-  unlock(){ const was=LOCK.locked; LOCK.locked=false; LOCK.seen(Date.now()); document.documentElement.classList.remove("locked","veil","prelock"); $("lock").hidden=true; if(!PAINTED) soon3D(700).then(firstPaint); else if(was&&DATA) refresh(); } };
+  unlock(){ const was=LOCK.locked; LOCK.locked=false; LOCK.seen(Date.now()); document.documentElement.classList.remove("locked","veil","prelock"); $("lock").hidden=true; if(!PAINTED) firstPaint(); else if(was&&DATA) refresh(); } };
 async function bioCreate(){ const cred=await navigator.credentials.create({publicKey:{challenge:crypto.getRandomValues(new Uint8Array(32)),rp:{name:"Artha"},
   user:{id:crypto.getRandomValues(new Uint8Array(16)),name:store.get("email","")||"artha",displayName:"Artha · "+(store.get("me","")||"me")},
   pubKeyCredParams:[{type:"public-key",alg:-7},{type:"public-key",alg:-257}],
@@ -1818,11 +1819,14 @@ document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==
 if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(()=>{});
 /* start-up order: the lock is decided first (index.html has already hidden the app if it will lock), the 3D layer loads meanwhile,
    and the home is drawn exactly once: after the fingerprint when locked, straight away otherwise */
-function firstPaint(){ if(PAINTED) return; PAINTED=true; if(!S3.stub){ S3.initBg($("bg3d")); const a=ACC.find(x=>x[0]===store.get("acc","")); if(a) setTimeout(()=>S3.ringColor(a[2]),50); }
-  build(); setTab(TAB_NOW); if(DATA) setSync(OUT.length||FAILED.length?"warn":"",liveLine());
-  /* 3D arrived late (slow phone or first install): bring it in once, quietly */
-  if(S3.stub) load3D().then(ok=>{ if(!S3.stub){ S3.initBg($("bg3d")); if(ok) refresh(); } }); }
-load3D(); if(!lockOnStart()) soon3D(900).then(firstPaint); pull(); setTimeout(()=>refreshNavs(),1500);
+function firstPaint(){ if(PAINTED) return; PAINTED=true; build(); setTab(TAB_NOW); if(DATA) setSync(OUT.length||FAILED.length?"warn":"",liveLine());
+  if(!S3.stub) start3D(); }
+/* the 3D ring and the background arrive after the first paint, when the phone is idle: only the ring is swapped, nothing else is redrawn */
+function start3D(){ if(S3.stub) return; S3.initBg($("bg3d")); const a=ACC.find(x=>x[0]===store.get("acc","")); const st=$("stage");
+  if(PAINTED&&M&&S3.ok&&!calm()&&st&&TAB_NOW==="inv"){ const fl=st.querySelector("svg.flat"); if(fl) fl.remove(); st.classList.remove("flatmode","pend"); S3.ring(st,ringSegs(totals()),RINGCB); ringFocus(); }
+  if(st) st.classList.remove("pend"); if(a) setTimeout(()=>S3.ringColor(a[2]),50); }
+idle(()=>load3D().then(()=>{ if(PAINTED) start3D(); }));
+if(!lockOnStart()) firstPaint(); pull(); setTimeout(()=>refreshNavs(),1500);
 /* started fine: tell the boot guard (index.html), and let the worker keep this version as the last good one */
 window.__arthaOK=1; setTimeout(()=>{ try{ const c=navigator.serviceWorker&&navigator.serviceWorker.controller; if(c&&$("legend")&&$("app").offsetHeight) c.postMessage({t:"good",v:APP_VERSION}); }catch(e){} },4000);
 { const rb=store.get("rolled",null); if(rb!=null){ try{ localStorage.removeItem("artha:rolled"); }catch(e){} setTimeout(()=>showToast("The newest version didn't start, so Artha opened the last one that worked. Your data is fine.",7000),1200); } }

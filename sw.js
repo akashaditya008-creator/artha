@@ -1,10 +1,10 @@
 // Artha app shell (3.12).
-// · Network first, so a new version shows the moment it is published; the saved copy when offline.
+// · Saved copy first, so Artha opens at once; the files are refreshed in the background for the next open.
 // · Every downloaded app file is checked (size + a marker) before it is used or saved, so a broken or empty
 //   file from the server is never shown: the last good copy is served instead.
 // · "artha-good" keeps the last version that started properly on this phone. If a new version fails to start,
 //   the page asks for a rollback and this worker serves that copy until the next update.
-const C="artha-v29", G="artha-good", META="artha-meta";
+const C="artha-v30", G="artha-good", META="artha-meta";
 const F=["./","index.html","app.css","app.js","scene.js","three.min.js","manifest.webmanifest","icon-192.png","icon-512.png"];
 const MIN={"./":4000,"index.html":4000,"app.js":60000,"app.css":20000,"scene.js":8000,"three.min.js":100000};
 const MARK={"./":'src="app.js',"index.html":'src="app.js',"app.js":"__arthaOK","scene.js":"Scene3D"};
@@ -27,12 +27,17 @@ self.addEventListener("fetch",e=>{ const u=new URL(e.request.url); if(e.request.
   const key=keyOf(u); if(F.indexOf(key)<0) return;
   const fromC=()=>caches.match(key,{cacheName:C,ignoreSearch:true}), fromG=()=>caches.open(G).then(g=>g.match(key,{ignoreSearch:true}));
   const saved=()=>fromC().then(m=>m||fromG()).then(m=>m||(key==="./"?caches.match("index.html",{ignoreSearch:true}):null));
+  /* Open from the saved copy at once (no waiting on the network). The whole set is refreshed in the background and kept only if
+     every file arrived whole, so the app never runs a mix of two versions; the new set is used from the next open, and
+     "Update now" in the app applies it straight away. */
   e.respondWith(getMode().then(mode=>{
     if(mode==="good") return fromG().then(m=>m||saved()).then(m=>m||fetch(u.href));
-    if(key==="three.min.js") return saved().then(m=>m||fetch(u.href));
-    return Promise.race([
-      fetch(u.href,{cache:"no-store"}).then(r=>good(key,r)).then(r=>{ if(r){ const cp=r.clone(); caches.open(C).then(c=>c.put(key,cp)); return r; } return saved(); }),
-      new Promise(res=>setTimeout(()=>res(null),4000))
-    ]).then(r=>r||saved()).catch(saved).then(r=>r||fetch(u.href));
+    return saved().then(m=>{ if(m){ if(key==="./"||key==="index.html") e.waitUntil(refreshAll()); return m; }
+      return fetch(u.href,{cache:"no-store"}).then(r=>good(key,r).then(ok=>{ if(ok){ const cp=ok.clone(); caches.open(C).then(c=>c.put(key,cp)); return ok; } return r; })); });
   })); });
+let refreshedAt=0;
+function refreshAll(){ if(Date.now()-refreshedAt<60000) return Promise.resolve(); refreshedAt=Date.now();
+  const L=F.filter(k=>k!=="three.min.js"&&k!=="./");
+  return Promise.all(L.map(k=>fetch(new Request(k,{cache:"no-store"})).then(r=>good(k,r)).then(r=>r?[k,r]:null,()=>null)))
+    .then(rs=>rs.every(Boolean)?caches.open(C).then(c=>Promise.all(rs.map(([k,r])=>k==="index.html"?Promise.all([c.put(k,r.clone()),c.put("./",r)]):c.put(k,r)))):null).catch(()=>null); }
 self.addEventListener("notificationclick",e=>{ e.notification.close(); e.waitUntil(self.clients.matchAll({type:"window"}).then(cs=>cs.length?cs[0].focus():self.clients.openWindow("./"))); });

@@ -650,3 +650,11 @@ html.locked .app,.locked .scr,.locked .sheet,.locked .add,.locked .esheet,.locke
 .dn{display:block;text-align:left;padding:11px 10px;border-radius:16px;background:var(--surface);border:1px solid var(--line);box-shadow:inset 0 2px 0 var(--c);min-width:0;color:var(--ink)}
 .dn b{display:block;font:600 15px var(--body);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .dn small{display:block;margin-top:3px;font-size:10.5px;line-height:1.25;color:var(--muted)}
+
+/* ================= 3.13.1: lighter. No live blur behind panels (the costliest effect on a phone); panels are near-solid instead ================= */
+*,*::before,*::after{-webkit-backdrop-filter:none!important;backdrop-filter:none!important}
+.scr{background:color-mix(in srgb,var(--bg) 95%,transparent)}
+.drawer{background:rgba(8,13,21,.97)}
+.add{background:rgba(4,7,12,.98)}
+.stage.pend svg.flat{opacity:0}
+.tapd{filter:none}
