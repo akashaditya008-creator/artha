@@ -1,7 +1,7 @@
 /* Artha 3.9 — investments + insurance. Data lives in the "Artha – My Investments" Google Sheet via the Apps Script API. */
 (()=>{
 "use strict";
-const APP_VERSION="3.13.1";
+const APP_VERSION="3.13.2";
 /* Personal details (banks, platforms, the Claude project link) come from the backend after sign-in, so this public code holds none. */
 const CFG=()=>(typeof DATA!=="undefined"&&DATA&&DATA.cfg)||{};
 const PROJECT_URL=()=>{ const u=safeUrl(CFG().project); return u==="#"?"https://claude.ai/projects":u; };

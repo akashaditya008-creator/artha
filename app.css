@@ -658,3 +658,18 @@ html.locked .app,.locked .scr,.locked .sheet,.locked .add,.locked .esheet,.locke
 .add{background:rgba(4,7,12,.98)}
 .stage.pend svg.flat{opacity:0}
 .tapd{filter:none}
+
+/* ================= 3.13.2 ================= */
+/* Panels slide in flat. Turning a whole panel in 3D made the phone draw it soft and then again sharp once it settled, which read as
+   the details card "rendering twice". The 3D stays where it is cheap and clear: the ring and the tap tilt. */
+@keyframes scrIn3{from{opacity:0;transform:translateX(26px)}}
+@keyframes scrOut3{to{opacity:0;transform:translateX(26px)}}
+@keyframes sheetUp3{from{transform:translateY(36%)}}
+@keyframes addIn3{from{opacity:0;transform:translateY(5%)}}
+@keyframes drawerIn3{from{transform:translateX(-100%)}}
+:root:not(.calm) .esheet:not(.bye) .box{animation-duration:.26s}
+:root:not(.calm) .scr:not(.bye){animation-duration:.26s}
+/* what is inside a sheet arrives with it, in one piece (no second wave of rows fading up) */
+.esheet .box>*,.esheet .box .tx,.esheet .box .hl,.esheet .box .list>*,.esheet .box .kv3,.esheet .box .sect{animation:none}
+/* the figure above the ring sits on its own soft card, like the Invested / Value today / Profit switch below it */
+.faces{margin:0 16px;border-radius:20px;background:color-mix(in srgb,var(--solid) 74%,transparent);border:1px solid var(--line);box-shadow:inset 0 1px 0 rgba(255,255,255,.05)}
