@@ -1,7 +1,7 @@
 /* Artha 3.9 — investments + insurance. Data lives in the "Artha – My Investments" Google Sheet via the Apps Script API. */
 (()=>{
 "use strict";
-const APP_VERSION="3.13.3";
+const APP_VERSION="3.13.4";
 /* Personal details (banks, platforms, the Claude project link) come from the backend after sign-in, so this public code holds none. */
 const CFG=()=>(typeof DATA!=="undefined"&&DATA&&DATA.cfg)||{};
 const PROJECT_URL=()=>{ const u=safeUrl(CFG().project); return u==="#"?"https://claude.ai/projects":u; };
@@ -287,9 +287,11 @@ function dueItems(who){ const L=[]; bondsFor(who).filter(b=>!b.closed).forEach(b
 function soonItems(who,n){ const L=[], lim=addDays(M.today,n); bondsFor(who).filter(b=>!b.closed).forEach(b=>b.open.forEach(e=>{ if(e.d>M.today&&e.d<=lim) L.push({b,e}); })); return L.sort((x,y)=>x.e.d<y.e.d?-1:1); }
 function nextPremium(c){
   const paid=c.T.filter(t=>t.date).sort((a,b)=>a.date<b.date?-1:1), lp=paid[paid.length-1]; if(!lp) return null;
-  const y=+lp.date.slice(0,4), cand=[`${y-1}-08-01`,`${y}-02-01`,`${y}-08-01`,`${y+1}-02-01`];
+  /* the policy Claude read (pterm under pol-term) gives the real due day and the current half-yearly premium (GST dropped from Sep 2025) */
+  const pt=M&&M.rec?termsOf("pol-term")[0]:null, dd=pt&&/^\d{4}-\d\d-\d\d$/.test(pt.d.start||"")?pt.d.start.slice(8,10):"01", half=pt&&+pt.d.premium>0?Math.round(+pt.d.premium/2*100)/100:0;
+  const y=+lp.date.slice(0,4), cand=[`${y-1}-08-${dd}`,`${y}-02-${dd}`,`${y}-08-${dd}`,`${y+1}-02-${dd}`];
   const due=cand.reduce((b,d)=>Math.abs(days(d,lp.date))<Math.abs(days(b,lp.date))?d:b,cand[0]);
-  return {date:addMonths(due,6),amt:c.T[c.T.length-1].amt,left:60-c.T.length};
+  return {date:addMonths(due,6),amt:half||c.T[c.T.length-1].amt,left:60-c.T.length};
 }
 const first=T=>T.filter(t=>t.date).reduce((m,t)=>!m||t.date<m?t.date:m,"");
 const fyOf=s=>{ const y=+s.slice(0,4),m=+s.slice(5,7); return m>=4?y:y-1; };
@@ -1044,11 +1046,12 @@ let INSF=store.get("insf","all");
 function dring(left,total,col){ const k=total>0?Math.max(0,Math.min(1,left/total)):0, R=19, C=2*Math.PI*R;
   return `<svg class="dring" viewBox="0 0 46 46"><circle cx="23" cy="23" r="${R}" stroke="rgba(255,255,255,.08)"/><circle cx="23" cy="23" r="${R}" stroke="${col}" stroke-dasharray="${C*k} ${C}" transform="rotate(-90 23 23)" stroke-linecap="round" style="filter:drop-shadow(0 0 4px ${col})"/><text x="23" y="27" text-anchor="middle"${left>999?' style="font-size:9px"':""}>${left<0?"!":left}</text></svg>`; }
 function renderIns(){ const el=$("viewIns"); if(!M) return; const P=policies();
-  const rows=P.map(p=>{ const c=p.d.link==="term"?null:currentTerm(p.id), end=polEnd(p), left=end?days(M.today,end):null, total=c&&c.d.start&&c.d.end?days(c.d.start,c.d.end):365;
-    return {p,c,end,left,total,cover:c?+c.d.cover||0:0,prem:c?+c.d.premium||0:0}; }).sort((a,b)=>(a.left==null?9e9:a.left)-(b.left==null?9e9:b.left));
+  const termP=M.term?nextPremium(M.term):null;
+  const rows=P.map(p=>{ const isT=p.d.link==="term", c=currentTerm(p.id), end=polEnd(p), left=end?days(M.today,end):null, total=isT?182:c&&c.d.start&&c.d.end?days(c.d.start,c.d.end):365;
+    return {p,c:isT?null:c,end,left,total,cover:c?+c.d.cover||0:0,prem:isT?(termP?termP.amt*2:0):c?+c.d.premium||0:0}; }).sort((a,b)=>(a.left==null?9e9:a.left)-(b.left==null?9e9:b.left));
   const act=rows.filter(x=>x.left==null||x.left>=0), types=[...new Set(P.map(p=>p.d.type))], F=INSF!=="all"&&types.includes(INSF)?rows.filter(x=>x.p.d.type===INSF):rows;
-  const next=act.filter(x=>x.left!=null)[0], termP=M.term?nextPremium(M.term):null;
-  const yearly=SUM(act,x=>x.prem)+(termP?termP.amt*2:0);
+  const next=act.filter(x=>x.left!=null)[0];
+  const yearly=SUM(act,x=>x.prem);
   let h=`<div class="sumc tilt insHero" style="--c:#B18CFF"><div class="l">${esc(L("ins_title"))} · ${act.length} active</div><div class="v num">${money(SUM(act,x=>x.cover),true)}</div><div class="s">Total cover · not counted in your worth</div>
     <div class="kv3"><div><small>Premiums / yr</small><b class="num">${money(yearly,true)}</b></div><div><small>Next renewal</small><b>${next?fmtDs(next.end):"—"}</b></div><div><small>Policies</small><b>${P.length}</b></div></div></div>`;
   const wait=recs("inbox").filter(r=>r.d.status==="new"&&r.d.kind==="policy").length; if(wait) h+=`<button class="ai" id="insProc">${svgI("spark","var(--neon2)")}<span><b>${wait} document${wait>1?"s":""} waiting for Claude</b><small>Tap to process now</small></span></button>`;
@@ -1064,10 +1067,10 @@ function renderIns(){ const el=$("viewIns"); if(!M) return; const P=policies();
   $("insAdd").onclick=()=>addPolicy(); }
 function openPolicy(id){ if(!policies().some(x=>x.id===id)){ showToast("That policy is still syncing. Try again in a moment."); return; } openScr("pol",{id}); }
 function renderPolicy(){ const p=policies().find(x=>x.id===SC.id); const B=$("scrBody"), dk=$("scrDock"); if(!p){ if(isOpen($("scr"))) ov.back(); return; }
-  const col=polCol(p), cur=p.d.link==="term"?null:currentTerm(p.id), T=termsOf(p.id), hist=T.filter(t=>t!==cur), d=cur?cur.d:{};
+  const col=polCol(p), cur=currentTerm(p.id), T=termsOf(p.id), hist=T.filter(t=>t!==cur), d=cur?cur.d:{};
   let x=scrHead(p.d.title,`<button class="ib" data-act="pol-edit" data-term="${cur?esc(cur.id):""}" aria-label="Edit">${svgI("edit","var(--neon)")}</button>`);
   if(p.d.link==="term"){ const tc=M.term, np=nextPremium(tc), paid=SUM(tc.T,t=>t.amt), n=tc.T.length;
-    x+=`<div class="sumc tilt" style="--c:${col}"><div class="l">${esc(L("sec_prem"))} · not part of your worth</div><div class="v num">${money(paid,false)}</div><div class="prog"><i style="width:${n/60*100}%;background:${col};box-shadow:0 0 10px ${col}"></i></div>
+    x+=`<div class="sumc tilt" style="--c:${col}"><div class="l">${esc(L("sec_prem"))} · not part of your worth</div><div class="v num">${money(paid,false)}</div>${d.cover?`<div class="s">${money(+d.cover,true)} ${esc(L("cover_life"))}</div>`:""}<div class="prog"><i style="width:${n/60*100}%;background:${col};box-shadow:0 0 10px ${col}"></i></div>
       <div class="kv3"><div><small>Paid</small><b>${n} of 60</b></div><div><small>Left</small><b>${np?np.left:"—"}</b></div><div><small>Next due</small><b>${np?fmtDs(np.date):"—"}</b></div></div></div>`;
     x+=`<div class="gh"><span>${esc(L("sec_prem"))}</span><b class="num">${n}</b></div><div class="grp">${tc.T.slice().sort((a,b)=>(b.date||"")<(a.date||"")?-1:1).map(txRow).join("")}</div>`; }
   else { const left=d.end?days(M.today,d.end):null;

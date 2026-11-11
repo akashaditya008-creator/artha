@@ -23,7 +23,8 @@ LED = [
      "[reps 2024-09-01:9000,2025-03-01:9000,2025-09-01:9000,2026-03-01:9000,2026-09-01:9000,2027-03-01:9000]"],
     ["L0006", "2024-09-01", "Spardha", "Wint · Spardha", "Bonds", "Repayment", "Keertana Finserv Secured NCD Series 4", "", "", "", -9000, "Bank", ""],
     ["L0007", "2021-04-01", "Aditya", "Protean · Aditya", "Others", "Buy", "NPS Tier 1", "", "", "", 5900, "Bank", "nps"],
-    ["L0008", "2025-02-01", "Aditya", "HDFC Life · Aditya", "Others", "Premium", "Term insurance", "", "", "", 12508, "Bank", "term"],
+    ["L0008", "2025-02-01", "Aditya", "Insurance", "Insurance", "Premium", "Term insurance", "", "", "", 12508, "Bank", "term"],
+    ["L0011", "2026-08-09", "Aditya", "Insurance", "Insurance", "Premium", "Term insurance", "", "", "", 10600, "Bank", "term"],
 ]
 LONG = "Third-party liability (under the separate Tata AIG policy) when the bike is used for commercial hire or reward"
 REC = [
@@ -44,6 +45,9 @@ REC = [
     ["pol:car", "pol", {"title": "Father's Creta", "type": "health", "insured": "Creta · TS09 AB 1234", "holder": "Father"}],
     ["pterm:car26", "pterm", {"pol": "pol:car", "start": "2026-05-01", "end": "2027-04-30", "cover": "640000", "premium": "18200", "insurer": "Test General",
         "fields": {"Registration no.": "TEST0001", "IDV": "6,40,000", "NCB": "35%"}}],
+    # term life read by Claude: its sum assured counts in total cover, its premium and due day drive the term card
+    ["pterm:term", "pterm", {"pol": "pol-term", "start": "2022-08-09", "end": "2081-08-08", "cover": 15000000, "premium": 21200, "insurer": "Test Life",
+        "highlights": ["Pure term plan"], "fields": {"Nominee": "Test"}}],
     ["inbox:1", "inbox", {"kind": "bond", "title": "Bond screenshots", "status": "new", "at": "2026-11-09T10:00", "files": []}],
 ]
 DATA = {"v": 3, "at": "2026-11-09T08:00:00.000Z", "url": "https://docs.google.com/x", "led": LED, "rec": REC, "files": "",
@@ -132,6 +136,12 @@ def main():
                     back()
             back()
         click("#tabIns"); look("Home · insurance")
+        hero = pg.evaluate("document.querySelector('#viewIns .insHero').innerText")
+        tcard = pg.evaluate("document.querySelector('#viewIns [data-pol=\"pol-term\"]').innerText")
+        for c_, m_ in [("Cr" in hero.split(chr(10))[1], "insurance total includes the term sum assured: " + hero.split(chr(10))[1]),
+                       ("9 Feb" in tcard and "Cr" in tcard, "term card shows its sum assured and the policy's due day (9th): " + tcard.replace(chr(10), " | "))]:
+            print(("PASS " if c_ else "FAIL ") + m_)
+            if not c_: FAIL.append(m_)
         for pid in pg.evaluate("[...new Set([...document.querySelectorAll('#viewIns [data-pol]')].map(b=>b.dataset.pol))]"):
             click(f'#viewIns [data-pol="{pid}"]'); look(f"Policy {pid}"); back()
         click("#tabInv"); click("#viewRing"); pg.wait_for_timeout(300)
