@@ -1,0 +1,8 @@
+{
+  "name": "artha",
+  "private": true,
+  "description": "Not built with npm. Declares the three.js bundled as three.min.js so GitHub's Dependabot and security alerts can track it.",
+  "dependencies": {
+    "three": "0.128.0"
+  }
+}

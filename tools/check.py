@@ -59,6 +59,9 @@ if "--fix" in sys.argv and mi and mi.group(1) != sri:
     idx = idx.replace(mi.group(1), sri); open(os.path.join(ROOT, "index.html"), "w", encoding="utf-8").write(idx)
     mi = re.search(r'<meta name="three-sri" content="([^"]+)"', idx)
 ok(mi is not None and mi.group(1) == sri, "three.min.js integrity hash matches the file")
+rev = re.search(r'const [A-Za-z_$]="(\d+)"', open(os.path.join(ROOT, "three.min.js"), encoding="utf-8").read())
+pkg = json.loads(rd("package.json")).get("dependencies", {}).get("three", "") if os.path.exists(os.path.join(ROOT, "package.json")) else ""
+ok(rev is not None and pkg == f"0.{rev.group(1)}.0", f"package.json declares the bundled three.js (r{rev.group(1) if rev else '?'}) so Dependabot can track it")
 
 # 4c. no personal details in the public code (they come from the backend after sign-in)
 for word in ["ICICI\",", "Ujjivan", "Canara", "claude.ai/project/", "Stable Money · "]:
